@@ -1,7 +1,6 @@
 #pragma once
 #include "tetrisBase.h"
-#include <queue>
-#include <functional>
+#include<functional>
 #include<execution>
 #include<mutex>
 #include<memory>

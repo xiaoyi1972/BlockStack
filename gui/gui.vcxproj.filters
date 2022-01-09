@@ -64,16 +64,8 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="resources\small.ico">
+    <None Include="resources\Tetris.aps">
       <Filter>资源文件</Filter>
-    </Image>
-    <Image Include="resources\Tetris.ico">
-      <Filter>资源文件</Filter>
-    </Image>
-  </ItemGroup>
-  <ItemGroup>
-    <ResourceCompile Include="resources\Tetris.rc">
-      <Filter>资源文件</Filter>
-    </ResourceCompile>
+    </None>
   </ItemGroup>
 </Project>

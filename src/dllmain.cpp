@@ -185,11 +185,11 @@ extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], 
         auto [best, ishold] = ctx.getBest();
         std::vector<Oper>path;
         if (!ishold) {
-            path = Search::make_path(start, best, field);
+			path = Search::make_path(start, best, field, true);
         }
         else {
             auto holdNode = TetrisNode::spawn(v.hold ? *v.hold : dp.front(), &map, dySpawn);
-            path = Search::make_path(holdNode, best, field);
+			path = Search::make_path(holdNode, best, field, true);
             path.insert(path.begin(), Oper::Hold);
         }
         if (path.empty()) path.push_back(Oper::HardDrop);

@@ -4,24 +4,40 @@ std::vector<TetrisNode> Search::search(TetrisNode& first, TetrisMap& map) {
 	auto is_filter= (first.type == Piece::I || first.type == Piece::Z || first.type == Piece::S);
 	auto is_T = first.type == Piece::T;
 	auto softDrop_disable = true, fixed = false, fastMode = true;
-	std::vector<searchNode> queue;
+	std::vector< std::pair<TetrisNode, int>> queue;
+	queue.reserve(map.height * map.width * 4);
 	std::vector<TetrisNode> result;
-	filterLookUp<std::size_t> checked{ map };
-	filterLookUp<std::tuple<std::size_t, int, bool>> locks{ map };
+	result.reserve(4*map.width);
+	static filterLookUp<std::size_t> checked(map);
+	static filterLookUp<std::tuple<std::size_t, int, bool>> locks(map);
+	checked.update(map);
+	locks.update(map);
 	std::size_t amount = 0, cals = 0;
+
 	if (std::all_of(map.top, map.top + map.width, [&map](int n) {return n < map.height - 4; })) {
 		fastMode = true;
-		for (auto& node : first.getHoriZontalNodes(map)) {
+#ifdef ORIGN
+		for (auto& node : first.getHoriZontalNodes(map, queue)) {
 			auto drop = node.drop(map);
-			auto delta_rs = std::abs(node.rs - first.rs);
-			auto delta_x = std::abs(node.x - first.x);
+			auto delta_rs = std::abs(node.rs - first.rs), delta_x = std::abs(node.x - first.x);
 			if (delta_rs == 3) delta_rs = 1;
-			queue.emplace_back(drop, 1 + delta_x + delta_rs);
-			queue.back().node.step = node.y - drop.y;
+			queue.emplace_back(node.drop(map), 1 + delta_x + delta_rs);
+			queue.back().first.step = node.y - drop.y;
 			checked.set(drop, cals);
+	}
+		amount = cals = queue.size();
+#else
+		for (auto& [node, count] : first.getHoriZontalNodes(map, queue)) {
+			auto delta_rs = std::abs(node.rs - first.rs), delta_x = std::abs(node.x - first.x);
+			if (delta_rs == 3) delta_rs = 1;
+			count = 1 + delta_x + delta_rs;
+			node.step = node.getDrop(map);
+			node.y -= node.step;
+			checked.set(node, cals);
 			++cals;
 		}
 		amount = cals;
+#endif // 
 	}
 	else {
 		fastMode = false;
@@ -33,21 +49,25 @@ std::vector<TetrisNode> Search::search(TetrisNode& first, TetrisMap& map) {
 	auto updatePosition = [&](TetrisNode& target, int count, bool lastRotate) {
 		if (is_T && lastRotate == true) {
 			if (auto it = checked.get(target); it) {
-				queue[*it].node.lastRotate = true;
+				queue[*it].first.lastRotate = true;
 			}
 		}
-		if (fastMode && target.open(map)) return;
+		if (fastMode && target.open(map)) 
+			return;
 		if (!checked.contain(target)) {
 			target.lastRotate = lastRotate;
 			checked.set(target, amount);
-			queue.emplace_back(target, count);
+			queue.emplace_back(std::piecewise_construct,
+				std::forward_as_tuple(target.type, target.x, target.y, target.rs),
+				std::forward_as_tuple(count));
+			//queue.emplace_back(target, count);
+			queue.back().first.step = target.step;
 			++amount;
 		}
 	};
 
 	for (std::size_t i = 0; i != amount; ++i) {
-		auto element = queue[i];
-		auto& [node, count] = element;
+		auto& [node, count] = queue[i];
 		fixed = i < cals ? true : false;
 		if (!node.check(map, node.x, node.y - 1)) {
 			auto _step = node.step;
@@ -514,6 +534,8 @@ Evaluator::Status Evaluator::get(const Evaluator::Result& eval_result, Status& s
 			if (result.map_rise >= safe)
 			{
 				result.death += result.map_rise - safe;
+				result.deaded = true;
+				return result;
 			}
 			result.under_attack = 0;
 		}
@@ -583,7 +605,7 @@ Evaluator::Status Evaluator::get(const Evaluator::Result& eval_result, Status& s
 		}
 		return 14;
 	}();
-	if (hold && depth == 1)
+	if (hold  && depth == 1)
 		switch (*hold)
 		{
 		case Piece::T:

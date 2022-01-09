@@ -4,10 +4,6 @@
 #include "tImer.hpp"
 //#include"test.h"
 
-#define TestSpeed 0
-#define OUTPUT 0
-#define Play 1
-
 class MyTetris : public TetrisGame {
 public:
 	void Draw() {
@@ -110,20 +106,39 @@ public:
 	TetrisNode fromN, toN;
 };
 
+
+#define TestSpeed 1
+#define OUTPUT 1
+#define Play 0
+
 int main()
 {
 #if TestSpeed
+
+	TetrisMap map{ 10,40 };
+	//map[5] = {0b0000000000};
+	map[4] = { 0b1111111110 };
+	map[3] = { 0b0000000000 };
+    map[1] = { 0b0000000000 };
+	//map[0] = { 0b0111111111 };
+	map.update();
+	auto node = TetrisNode::spawn(Piece::J, &map, -18);
 	Timer t;
-	for (int i = 0; i < 100; i++) { 		//	std::cout << Timer::measure<Timer::us>([&]() { TetrisBot::search<true>(node, map); }) << "\n";
+	std::size_t times = 1, costs = 0;
+	bool is;
+	for (int i = 0; i < times; i++) { 		//	std::cout << Timer::measure<Timer::us>([&]() { TetrisBot::search<true>(node, map); }) << "\n";
 		t.reset();
 		auto nodes = Search::search(node, map);
 		auto cost = t.elapsed<Timer::us>();
+	
 		std::cout << cost << "us\n";
-		std::sort(nodes.begin(), nodes.end());
+		costs += cost;
 #if OUTPUT
+		std::sort(nodes.begin(), nodes.end());
+		std::cout << "\n";
 		for (auto& landpoint : nodes) {
 			landpoint.getTSpinType();
-			std::cout << landpoint.mapping(map) << landpoint;
+			std::cout << landpoint.mapping(map) << landpoint << " step:" << landpoint.step;
 			if (landpoint.type == Piece::T) 
 				std::cout << " TSpinType:"
 				<< landpoint.typeTSpin
@@ -134,7 +149,7 @@ int main()
 		}
 #endif
 	}
-	std::cout << "\nEnd\n";
+	std::cout << "\nEnd to " << times << " times\navg " << double(costs) / times << "us" << "\n";
 #else
 
 #if Play

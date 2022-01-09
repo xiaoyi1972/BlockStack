@@ -362,11 +362,20 @@ namespace customHash {
 }
 
 class TetrisNode {
+
 public:
-	TetrisNode(Piece _type = Piece::None, int _x = 3, int _y = 0, int _rs = 0)
-		:x(_x), y(_y), rs(_rs), type(_type),
-		data(_type == Piece::None ? nullptr : &rotateDatas[static_cast<int>(_type)][0]) {
-	}
+	Piece type;
+	int x, y, rs;
+	const std::array<Pos, 4U>* data;
+	int step;
+	bool mini, spin, lastRotate;
+	TSpinType typeTSpin = TSpinType::None;
+
+	TetrisNode(Piece _type = Piece::None, int _x = 3, int _y = 0, int _rs = 0) :
+		type(_type), x(_x), y(_y), rs(_rs),
+		data(_type == Piece::None ? nullptr : &rotateDatas[static_cast<int>(_type)][0]),
+		step(0),
+		mini(false), spin(false), lastRotate(false), typeTSpin(TSpinType::None) {}
 
 	bool operator!=(const TetrisNode& rhs) const { return !operator==(rhs); }
 	bool operator==(const TetrisNode& rhs) const { return type == rhs.type && x == rhs.x && y == rhs.y && rs == rhs.rs; }
@@ -445,20 +454,31 @@ public:
 		return count;
 	}
 
-	std::vector<TetrisNode> getHoriZontalNodes(TetrisMap& map) {
-		std::vector<TetrisNode> nodes{};
-		nodes.reserve((type == Piece::O ? 1 : 4) * map.width);
+	auto& getHoriZontalNodes(TetrisMap& map, std::vector<std::pair<TetrisNode, int>>& out) {
+#define GEN(_type,x,y,rs) \
+out.emplace_back(std::piecewise_construct,\
+		std::forward_as_tuple(type,x,y,rs),\
+			std::forward_as_tuple(0))
+		//std::vector<TetrisNode> nodes;
+		//nodes.reserve((type == Piece::O ? 1 : 4) * map.width);
+		out.reserve((type == Piece::O ? 1 : 4) * map.width);
 		auto node = *this;
-		while (node.check(map)) {
-			nodes.emplace_back(type, node.x, node.y, node.rs);
-			for (int n = 1; node.check(map, node.x - n, node.y); ++n)
-				nodes.emplace_back(type, node.x - n, node.y, node.rs);
-			for (int n = 1; node.check(map, node.x + n, node.y); ++n)
-				nodes.emplace_back(type, node.x + n, node.y, node.rs);
+		std::size_t i = 0;
+		for (auto i = 0; node.check(map) && i++ < 4;) {
+			GEN(type, node.x, node.y, node.rs);
+			//nodes.emplace_back(type, node.x, node.y, node.rs);
+			for (int n = 1; node.check(map, node.x - n, node.y); ++n) {
+				GEN(type, node.x - n, node.y, node.rs);
+				//nodes.emplace_back(type, node.x - n, node.y, node.rs);
+			}
+			for (int n = 1; node.check(map, node.x + n, node.y); ++n) {
+				GEN(type, node.x + n, node.y, node.rs);
+				//nodes.emplace_back(type, node.x + n, node.y, node.rs);
+			}
 			if (type != Piece::O) node.rotate();
-			if (node == *this) break;
 		}
-		return nodes;
+		//return nodes;
+		return out;
 	}
 
 	std::tuple<std::vector<Pos>, std::vector<int>> attachs(TetrisMapEx& map) { return attachs(map, x, y, rs); }
@@ -597,13 +617,6 @@ public:
 		const TetrisNode& node;
 	};
 
-	Piece type;
-	int x, y, rs;
-	int step{ 0 };
-	bool mini = false, spin = false, lastRotate = false;
-	TSpinType typeTSpin = TSpinType::None;
-	const std::array<Pos, 4U>* data = nullptr;
-
 	static constexpr std::array rotateDatas{
 		minoData<0, 6, 6, 0>::points(), // O
 		minoData <0, 0,15, 0>::points(), // I
@@ -638,19 +651,6 @@ public:
 	};
 };
 
-struct searchNode {
-	TetrisNode node;
-	int count;
-	searchNode(TetrisNode& _node, int _count) : node{ _node }, count(_count) {}
-	searchNode(TetrisNode&& _node, int _count) : node{ _node }, count(_count) {}
-	bool operator==(const searchNode& p) const {
-		return const_cast<TetrisNode&>(node).cellsEqual() == const_cast<TetrisNode&>(p.node).cellsEqual();
-	}
-	bool operator <(const searchNode& p) const {
-		return node < p.node;
-	}
-};
-
 template<class T>
 class filterLookUp {
 private:
@@ -670,59 +670,86 @@ private:
 			case 3:--x; r = 1; break;
 			}
 			break;
-		default:break;
 		}
 	}
+
 	int width, height;
-	std::vector<std::optional<T>> elem;
+	std::vector<std::pair<std::optional<T>, int>> elem;
+	int version;
 
 public:
 	filterLookUp(const TetrisMap& map) :
-		width(map.width), height(map.height), elem(map.width* map.height * 4, std::nullopt)
+		width(map.width), height(map.height), elem(map.width* map.height * 4), version(-1)
 	{
+	//	std::cout << "create from here...\n";
+	}
+
+	void update(const TetrisMap& map) {
+		if (width != map.width && height != map.height) {
+			width = map.width, height = map.height;
+			elem.resize(map.width * map.height * 4);
+		}
+		version++;
+	//	std::cout << "update\n";
 	}
 
 	template<bool is = true>
 	void set(const TetrisNode& target, const T& value) {
-		if constexpr (is)
-			elem[index(toFix(target.x, width), toFix(target.y, height), target.rs)] = value;
+		if constexpr (is) {
+			auto& val = elem[index(toFix(target.x, width), toFix(target.y, height), target.rs)];
+			val.first = value;
+			val.second = version;
+		}
 		else {
 			int x = target.x, y = target.y, r = target.rs;
 			dealUnity(x, y, r, target);
-			elem[index(toFix(x, width), toFix(y, height), r)] = value;
+			auto& val = elem[index(toFix(x, width), toFix(y, height), r)];
+			val.first = value;
+			val.second = version;
 		}
 	}
 
 	template<bool is = true>
 	void clear(const TetrisNode& target) {
-		if constexpr (is)
-			elem[index(toFix(target.x, width), toFix(target.y, height), target.rs)] = std::nullopt;
+		if constexpr (is) {
+			auto& val = elem[index(toFix(target.x, width), toFix(target.y, height), target.rs)];
+			val.first = std::nullopt;
+			val.second = version;
+		}
 		else {
 			int x = target.x, y = target.y, r = target.rs;
 			dealUnity(x, y, r, target);
-			elem[index(toFix(x, width), toFix(y, height), r)] = std::nullopt;
+			auto& val = elem[index(toFix(x, width), toFix(y, height), r)];
+			val.first = std::nullopt;
+			val.second = version;
 		}
 	}
 
 	template<bool is = true>
 	bool contain(const TetrisNode& target) {
-		if constexpr (is)
-			return elem[index(toFix(target.x, width), toFix(target.y, height), target.rs)].has_value();
+		if constexpr (is) {
+			auto& val = elem[index(toFix(target.x, width), toFix(target.y, height), target.rs)];
+			return val.second == version ? val.first.has_value() : false;
+		}
 		else {
 			int x = target.x, y = target.y, r = target.rs;
 			dealUnity(x, y, r, target);
-			return elem[index(toFix(x, width), toFix(y, height), r)].has_value();
+			auto& val = elem[index(toFix(x, width), toFix(y, height), r)];
+			return val.second == version ? val.first.has_value() : false;
 		}
 	}
 
 	template<bool is = true>
 	auto& get(const TetrisNode& target) {
-		if constexpr (is)
-			return elem[index(toFix(target.x, width), toFix(target.y, height), target.rs)];
+		if constexpr (is) {
+			auto& val = elem[index(toFix(target.x, width), toFix(target.y, height), target.rs)];
+			return val.second == version ? val.first : val.first = std::nullopt;
+		}
 		else {
 			int x = target.x, y = target.y, r = target.rs;
 			dealUnity(x, y, r, target);
-			return elem[index(toFix(x, width), toFix(y, height), r)];
+			auto& val = elem[index(toFix(x, width), toFix(y, height), r)];
+			return val.second == version ? val.first : val.first = std::nullopt;
 		}
 	}
 

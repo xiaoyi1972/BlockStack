@@ -43,7 +43,7 @@ public:
 	std::vector<Oper> caculateBot(TetrisNode start, TetrisMap field, const int limitTime) {
 		using std::chrono::high_resolution_clock;
 		using std::chrono::milliseconds;
-		static 
+	//	static 
 		TreeContext ctx;
 		auto dp = std::vector(rS.displayBag.begin(), rS.displayBag.begin() + 6);
 		ctx.createRoot(start, field, dp, hS.type, !!gd.b2b, gd.combo, std::holds_alternative<Modes::versus>(gm) ?
