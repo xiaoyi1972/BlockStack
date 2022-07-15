@@ -131,9 +131,9 @@ auto Recorder::isEnd() {
 }
 
 int TetrisGame::sendTrash(const std::tuple<TSpinType, int, bool, int> &status) {
-    int attackTo = 0;
     auto [spin, clear, b2b, combo] = status;
-    int clears[] = {0, 0, 1, 2, 4};
+    int attackTo = 0;
+    int clears[] {0, 0, 1, 2, 4};
     if (spin != TSpinType::None) {
         switch (clear) {
         case 1: attackTo += ((spin == TSpinType::TSpinMini ? 1 : 2) + b2b); break;

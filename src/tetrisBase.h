@@ -394,7 +394,7 @@ public:
 	void rotate(int index = 1) {
 		if constexpr (reverse) rs = rs - index;
 		else rs = rs + index;
-		rs = (rs + 4) % 4;
+		rs &= 3;
 	}
 
 	bool check(const TetrisMap& map, int x, int  y, int rs) const {
@@ -503,7 +503,7 @@ out.emplace_back(std::piecewise_construct,\
 
 	inline auto& getkickDatas(bool dirReverse = false) {
 		auto& r1 = rs;
-		int i = r1 * 2 + !dirReverse;
+		int i = (r1 << 1) + !dirReverse;
 		if (type == Piece::I) return kickDatas[1][i];
 		else return kickDatas[0][i];
 	}
@@ -541,7 +541,7 @@ out.emplace_back(std::piecewise_construct,\
 		auto trans = tn.rs;
 		if constexpr (reverse) trans--;
 		else trans++;
-		trans = (trans + 4) % 4;
+		trans &= 3;
 
 		if (!tn.check(map, tn.x, tn.y, trans)) {
 			for (std::size_t i = 0; i < kd.size(); i += 2) {
@@ -681,7 +681,6 @@ public:
 	filterLookUp(const TetrisMap& map) :
 		width(map.width), height(map.height), elem(map.width* map.height * 4), version(-1)
 	{
-	//	std::cout << "create from here...\n";
 	}
 
 	void update(const TetrisMap& map) {
@@ -690,7 +689,6 @@ public:
 			elem.resize(map.width * map.height * 4);
 		}
 		version++;
-	//	std::cout << "update\n";
 	}
 
 	template<bool is = true>

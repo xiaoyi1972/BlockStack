@@ -107,9 +107,9 @@ public:
 };
 
 
-#define TestSpeed 1
-#define OUTPUT 1
-#define Play 0
+#define TestSpeed 0
+#define OUTPUT 0
+#define Play 1
 
 int main()
 {
@@ -117,20 +117,21 @@ int main()
 
 	TetrisMap map{ 10,40 };
 	//map[5] = {0b0000000000};
-	map[4] = { 0b1111111110 };
-	map[3] = { 0b0000000000 };
-    map[1] = { 0b0000000000 };
-	//map[0] = { 0b0111111111 };
+	//map[4] = { 0b1000000000 };
+	//map[2] = { 0b0111111111 };
+    //map[1] = { 0b0011111111 };
+	map[0] = { 0b0111111111 };
 	map.update();
-	auto node = TetrisNode::spawn(Piece::J, &map, -18);
+	auto node = TetrisNode::spawn(Piece::T, &map, -18);
+	std::cout << node.mapping(map) << "\n";
+	return 0;
 	Timer t;
-	std::size_t times = 1, costs = 0;
+	std::size_t times = 1000, costs = 0;
 	bool is;
 	for (int i = 0; i < times; i++) { 		//	std::cout << Timer::measure<Timer::us>([&]() { TetrisBot::search<true>(node, map); }) << "\n";
 		t.reset();
 		auto nodes = Search::search(node, map);
 		auto cost = t.elapsed<Timer::us>();
-	
 		std::cout << cost << "us\n";
 		costs += cost;
 #if OUTPUT

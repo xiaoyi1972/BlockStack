@@ -46,7 +46,7 @@ public:
 	//	static 
 		TreeContext ctx;
 		auto dp = std::vector(rS.displayBag.begin(), rS.displayBag.begin() + 6);
-		ctx.createRoot(start, field, dp, hS.type, !!gd.b2b, gd.combo, std::holds_alternative<Modes::versus>(gm) ?
+		ctx.createRoot(start, field, dp, hS.type, hS.able, !!gd.b2b, gd.combo, std::holds_alternative<Modes::versus>(gm) ?
 			std::get<Modes::versus>(gm).trashLinesCount : 0, dySpawn);
 		auto now = high_resolution_clock::now(), end = now + milliseconds(limitTime);
 		do {

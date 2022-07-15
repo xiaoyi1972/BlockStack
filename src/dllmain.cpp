@@ -44,7 +44,7 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
 extern "C" DECLSPEC_EXPORT char const* WINAPI Name()
 {
-    static std::string name = "test";
+    static std::string name = "test1";
     return name.c_str();
 }
 
@@ -56,7 +56,7 @@ extern "C" DECLSPEC_EXPORT int __cdecl AIDllVersion()
 extern "C" DECLSPEC_EXPORT char* __cdecl AIName(int level)
 {
     static char name[200];
-    static std::string name1 = "test";
+    static std::string name1 = "test1";
     strcpy_s(name, name1.c_str());
     return name;
 }
@@ -156,9 +156,10 @@ extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], 
         std::vector<Piece> nexts;
 		std::optional<Piece> hold;
         Piece cur;
-        int b2b = 0;
-        int combo = 0;
-        int upcomeAtt = 0;
+        int b2b;
+        int combo;
+        int upcomeAtt;
+        bool canHold;
     }v;
    // printf("x %d y %d spin %d",x,y, spin);
 
@@ -170,14 +171,15 @@ extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], 
     v.b2b = b2b;
     v.combo = combo;
 	v.upcomeAtt = upcomeAtt;
+    v.canHold = curCanHold;
 
     auto call = [&](TetrisNode &start, TetrisMap &field, const int limitTime) {
         using std::chrono::high_resolution_clock;
         using std::chrono::milliseconds;
-       // static
+        //static
             TreeContext ctx;
         auto dp = std::vector(v.nexts.begin(), v.nexts.end());
-        ctx.createRoot(start, field, dp, v.hold, !!v.b2b, v.combo,v.upcomeAtt, dySpawn);
+		ctx.createRoot(start, field, dp, v.hold, v.canHold, !!v.b2b, v.combo, v.upcomeAtt, dySpawn);
         auto now = high_resolution_clock::now(), end = now + milliseconds(limitTime);
         do {
             ctx.run();

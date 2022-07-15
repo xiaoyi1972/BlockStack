@@ -160,6 +160,7 @@ void Engine::Logic(double elapsedTime)
 				botReady = -1;
 				botOperSource.clear();
 				if (botPressed == 0) {
+					//botPressed = -1;
 					botPressed = 1;
 				}
 			}
@@ -225,7 +226,7 @@ void Engine::Logic(double elapsedTime)
 		holdPressed = 0;
 	}
 	if (botPressed == 1) {
-		constexpr int time = 130;
+		constexpr int time = 100;
 		test = pool.enqueue(
 			[&](auto time) {
 				botOperSource = std::move(tetris.callBot(time));

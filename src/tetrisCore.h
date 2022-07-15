@@ -71,7 +71,7 @@ struct Evaluator {
 
 	Result evalute(TetrisNode& lp, TetrisMap& map, int clear, int tCount);
 	int getSafe(const TetrisMap& map);
-	Status get(const Result& eval_result, Status& status, std::optional<Piece> hold, std::vector<Piece>* nexts, int depth);
+	Status get(const Result& eval_result, Status& status, std::optional<Piece> hold, std::vector<Piece>* nexts, int depth, int needSd);
 };
 
 
@@ -92,7 +92,7 @@ private:
     std::vector<double> width_cache;
     bool isOpenHold = true;
     double  div_ratio{};
-    int width{}, tCount = 0;
+	int width{}, tCount = 0, dySpawnDefault = 0;
     std::vector<TetrisNode> nodes;
     std::unique_ptr<TreeNode, decltype(TreeContext::treeDelete)*> root;
 public:
@@ -102,7 +102,7 @@ public:
         root.reset(nullptr); 
         return; 
     }
-    void createRoot(const TetrisNode&, const TetrisMap&, std::vector<Piece>&, std::optional<Piece>, int, int, int,int );
+	void createRoot(const TetrisNode&, const TetrisMap&, std::vector<Piece>&, std::optional<Piece>, bool, int, int, int, int);
     void update(TreeNode*);
     void run();
     Result empty();
@@ -150,10 +150,10 @@ public:
     bool operator==(TreeNode& p) {
         return cur == p.cur &&
             map == p.map &&
-            hold == p.hold /* &&
+            hold == p.hold  &&
             evalParm.status.under_attack == p.evalParm.status.under_attack &&
             evalParm.status.b2b == p.evalParm.status.b2b &&
-			evalParm.status.combo == p.evalParm.status.combo*/;
+			evalParm.status.combo == p.evalParm.status.combo;
     }
     TreeNode* generateChildNode(TetrisNode&, bool, std::optional<Piece>, bool);
     void search();
