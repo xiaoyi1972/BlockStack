@@ -4,6 +4,8 @@
 #include <vector>
 #include "tetrisGame.h"
 #include "tetrisCore.h"
+#include "ThreadPool.h"
+#include <vector>
 #include <iostream>
 #define USE_CONSOLE 0
 BOOL APIENTRY DllMain(HMODULE hModule,
@@ -173,25 +175,37 @@ extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], 
 	v.upcomeAtt = upcomeAtt;
     v.canHold = curCanHold;
 
+    static ThreadPool threadPool{ 3 };
+
     auto call = [&](TetrisNode &start, TetrisMap &field, const int limitTime) {
         using std::chrono::high_resolution_clock;
         using std::chrono::milliseconds;
         //static
-            TreeContext ctx;
+        TreeContext<TreeNode> ctx;
         auto dp = std::vector(v.nexts.begin(), v.nexts.end());
 		ctx.createRoot(start, field, dp, v.hold, v.canHold, !!v.b2b, v.combo, v.upcomeAtt, dySpawn);
         auto now = high_resolution_clock::now(), end = now + milliseconds(limitTime);
-        do {
-            ctx.run();
-        } while ((now = high_resolution_clock::now()) < end);
+
+        auto taskrun = [&]() {
+            do {
+                ctx.run();
+            } while ((now = high_resolution_clock::now()) < end);
+        };
+        std::vector<std::future<void>> futures;
+        auto thm = threadPool.get_idl_num();
+        for (auto i = 0; i < thm; i++)
+            futures.emplace_back(threadPool.commit(taskrun));
+        for (auto& run : futures)
+            run.wait();
+
         auto [best, ishold] = ctx.getBest();
         std::vector<Oper>path;
         if (!ishold) {
-			path = Search::make_path(start, best, field, true);
+			path = Search::make_path(start, best, field, false);
         }
         else {
             auto holdNode = TetrisNode::spawn(v.hold ? *v.hold : dp.front(), &map, dySpawn);
-			path = Search::make_path(holdNode, best, field, true);
+			path = Search::make_path(holdNode, best, field, false);
             path.insert(path.begin(), Oper::Hold);
         }
         if (path.empty()) path.push_back(Oper::HardDrop);

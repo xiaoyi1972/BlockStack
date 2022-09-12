@@ -39,19 +39,37 @@ public:
 		return caculateBot(tn, map, limitTime);
 	}
 
-#if BotStyle
+#if BotStyle == 1
 	std::vector<Oper> caculateBot(TetrisNode start, TetrisMap field, const int limitTime) {
 		using std::chrono::high_resolution_clock;
 		using std::chrono::milliseconds;
-	//	static 
-		TreeContext ctx;
+		static 
+			TreeContext<TreeNode> ctx;
 		auto dp = std::vector(rS.displayBag.begin(), rS.displayBag.begin() + 6);
 		ctx.createRoot(start, field, dp, hS.type, hS.able, !!gd.b2b, gd.combo, std::holds_alternative<Modes::versus>(gm) ?
 			std::get<Modes::versus>(gm).trashLinesCount : 0, dySpawn);
-		auto now = high_resolution_clock::now(), end = now + milliseconds(limitTime);
-		do {
+//#define USE_ITERATION
+#ifdef USE_ITERATION
+		auto times = 10000;
+		for (auto i = 0; i < times; i++){
 			ctx.run();
-		} while ((now = high_resolution_clock::now()) < end);
+	 }
+#else
+		auto& pool = engine->pool;
+		auto now = high_resolution_clock::now(), end = now + milliseconds(limitTime);
+		auto taskrun = [&]() {
+			do {
+				ctx.run();
+			} while ((now = high_resolution_clock::now()) < end);
+		};
+		std::vector<std::future<void>> futures;
+		auto thm = pool.get_idl_num();
+		for (auto i = 0; i < thm; i++)
+			futures.emplace_back(pool.commit(taskrun));
+		for (auto& run : futures)
+			run.wait();
+#endif
+#undef USE_ITERATION
 		auto [best, ishold] = ctx.getBest();
 		std::vector<Oper>path;
 		if (!ishold) {
@@ -261,6 +279,6 @@ private:
 	std::future<void> test;
 	std::vector<Oper> botOperSource;
 	bool started = false, completed = false;
-	ThreadPool pool{ 1 };
+	ThreadPool pool{ 2 };
 };
 

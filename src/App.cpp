@@ -32,7 +32,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 
 MainApp::MainApp() : m_hwnd(NULL)
 {
-	engine = new Engine();
 	constexpr bool USE_CONSOLE = true ^ 1;
 	if constexpr (USE_CONSOLE) {
 		FILE* stream1;
@@ -40,6 +39,7 @@ MainApp::MainApp() : m_hwnd(NULL)
 		freopen_s(&stream1, "CONOUT$", "w+t", stdout);
 		freopen_s(&stream1, "CONIN$", "r+t", stdin);
 	}
+	engine = new Engine();
 }
 
 

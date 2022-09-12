@@ -21,9 +21,6 @@
     <ClCompile Include="..\src\tetrisBase.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\tetrisCore.cpp">
-      <Filter>源文件</Filter>
-    </ClCompile>
     <ClCompile Include="..\src\tetrisGame.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
@@ -39,6 +36,15 @@
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="..\src\timer.hpp">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\tool.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\pdqsort.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\ThreadPool.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

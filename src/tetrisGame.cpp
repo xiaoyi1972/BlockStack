@@ -1,10 +1,12 @@
 ﻿#include "tetrisGame.h"
 
 void Random::getBag() {
-    constexpr bool  test = false;
-	if constexpr (test) {
+	if constexpr (My::test) {
         //bag = std::vector<Piece>{ 7 , Piece::I };
-		bag = { Piece::L,Piece::I,Piece::L,Piece::I,Piece::L,Piece::I,Piece::L };
+		//bag = { Piece::O, Piece::I, Piece::T, Piece::L, Piece::J, Piece::S, Piece::Z };
+        //bag = { Piece::O, Piece::T, Piece::Z, Piece::S, Piece::I, Piece::L, Piece::J };
+        bag = { Piece::S, Piece::T, Piece::J, Piece::Z, Piece::I, Piece::O, Piece::L };
+        //bag = { Piece::T, Piece::J, Piece::S, Piece::Z, Piece::I, Piece::L, Piece::O};
         return;
     }
     else {
@@ -257,7 +259,7 @@ void TetrisGame::hardDrop() {
     if (clear.size() == 4 || (clear.size() > 0 && tn.typeTSpin != TSpinType::None))  gd.b2b++;
     else if (clear.size() > 0) gd.b2b = 0;
     gd.combo = clear.size() > 0 ? gd.combo + 1 : 0;
-    auto attack = sendTrash(std::tuple<TSpinType, int, bool, int> {tn.typeTSpin, clear.size(), gd.b2b > 1, gd.combo});
+    auto attack =  sendTrash(std::tuple<TSpinType, int, bool, int> {TSpinType(tn.typeTSpin), clear.size(), gd.b2b > 1, gd.combo});
     gd.pieces++;
     gd.clear += clear.size();
     auto piece = rS.getOne();

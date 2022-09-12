@@ -23,6 +23,9 @@
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; }; // helper type for the visitor #4
 template<class... Ts> overloaded(Ts...)->overloaded<Ts...>; // explicit deduction guide (not needed as of C++20)
 
+namespace My {
+	static constexpr bool  test = false ^ 0;
+}
 
 class Random {
 public:
@@ -45,6 +48,9 @@ public:
 	std::optional<Piece>  type;
 
 	Hold() :able(true), type(std::nullopt) {
+		if constexpr (My::test) {
+			//type = Piece::L;
+		}
 	}
 
 	void reset();
@@ -189,7 +195,7 @@ protected:
 	};
 
 	int dySpawn = -18;
-	Random rS;
+	Random rS{};
 	Hold hS;
 	gameData gd;
 	using playing_mode = std::in_place_index_t<0>;

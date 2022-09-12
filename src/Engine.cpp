@@ -154,8 +154,16 @@ void Engine::Logic(double elapsedTime)
 
 	if (botReady != -1) {
 		botTimer += elapsedTime;
+//#define USE_QUICK_MOVE
+#ifdef USE_QUICK_MOVE
+		for (; botReady < botOperSource.size(); botReady)
+			tetris.opers(botOperSource[botReady++]);
+#endif
+
+#ifndef USE_QUICK_MOVE
 		if (botReady == botOperSource.size() || botTimer > (botOperSource[botReady] == Oper::SoftDrop ? 0.014  : 0.025)) {
 			tetris.opers(botOperSource[botReady++]);
+#endif
 			if (botReady == botOperSource.size()) {
 				botReady = -1;
 				botOperSource.clear();
@@ -163,7 +171,10 @@ void Engine::Logic(double elapsedTime)
 					//botPressed = -1;
 					botPressed = 1;
 				}
+#ifndef USE_QUICK_MOVE
 			}
+#endif
+
 			botTimer = 0;
 		}
 	}
@@ -226,8 +237,8 @@ void Engine::Logic(double elapsedTime)
 		holdPressed = 0;
 	}
 	if (botPressed == 1) {
-		constexpr int time = 100;
-		test = pool.enqueue(
+		constexpr int time = 85;
+		test = std::async(
 			[&](auto time) {
 				botOperSource = std::move(tetris.callBot(time));
 				hao = true; }, time);
