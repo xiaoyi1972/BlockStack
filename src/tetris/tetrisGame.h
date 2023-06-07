@@ -11,18 +11,21 @@
 
 #include<vector>
 #include<deque>
-#include"tetrisBase.h"
 #include<chrono>
 #include<variant>
-#include<type_traits>
-#include<utility>
 #include<array>
 #include<list>
 #include<sstream>
+#include<mutex>
+#include<random>
+#include"tetrisBase.h"
 
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; }; // helper type for the visitor #4
 template<class... Ts> overloaded(Ts...)->overloaded<Ts...>; // explicit deduction guide (not needed as of C++20)
 
+namespace My {
+	static constexpr bool  test = false ^ 0;
+}
 
 class Random {
 public:
@@ -45,6 +48,9 @@ public:
 	std::optional<Piece>  type;
 
 	Hold() :able(true), type(std::nullopt) {
+		if constexpr (My::test) {
+			//type = Piece::L;
+		}
 	}
 
 	void reset();
@@ -89,7 +95,7 @@ namespace Modes {
 					num = int(randSys.randGen() % 10);
 					row &= ~(1 << num);
 				} while (row == map[0]);
-				std::memmove(map.data + 1, map.data, (map.height - 1) * sizeof(int));
+				memmove(map.data + 1, map.data, (map.height - 1) * sizeof(int));
 				map.data[0] = row;
 				if (!isInit) {
 					map.colorDatas.pop_back();
@@ -115,7 +121,7 @@ namespace Modes {
 					digModAdd(tg, needDigRows, false);
 					digRows = 10;
 					for (auto& piecePos : pieceChanges)
-						piecePos.x += needDigRows;
+						piecePos.y += needDigRows;
 				}
 			}
 		}
@@ -124,49 +130,63 @@ namespace Modes {
 	struct versus {
 		int trashLinesCount = 0;
 		std::list<int> trashLines;
-		static constexpr std::array<int, 13> comboTable{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 5,-1 };
+		static constexpr std::array comboTable{ 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 4, 5,-1 };
+
 		template<class T>
 		void handle(T* tg, bool noClear, int& attack, std::vector<Pos>& pieceChanges) {
 			auto& map = tg->map;
 			auto& rS = tg->rS;
+			auto& opponent = tg->opponent;
 			auto addLines = [&](int rows) {
 				auto row = 0b1111111111;
 				auto num = 0;
 				num = int(rS.randGen() % 10);
 				row &= ~(1 << num);
 				for (auto i = 0; i < rows; i++) {
-					std::copy(map.data + 1, map.data + map.height - 1, map.data);
-					map.data[map.height - 1] = row;
-					map.colorDatas.erase(map.colorDatas.begin());
-					map.colorDatas.push_back(std::vector<Piece>(map.width, Piece::Trash));
-					map.colorDatas[map.height - 1][num] = Piece::None;
+					memmove(map.data + 1, map.data, (map.height - 1) * sizeof(int));
+					map.data[0] = row;
+					map.colorDatas.pop_back();
+					map.colorDatas.insert(map.colorDatas.begin(), std::vector<Piece>(map.width, Piece::Trash));
+					map.colorDatas[0][num] = Piece::None;
 				}
 			};
 			auto addCount = 0;
-			while (trashLinesCount != 0) {
-				auto& first = trashLines.front();
-				if (!noClear) {
-					if (attack <= 0)
-						break;
-					auto offset = std::min(attack, first);
-					attack -= (first -= offset, offset);
-					trashLinesCount -= offset;
-					if (first <= 0)
+			{
+				std::lock_guard guard(tg->mtx);
+				while (trashLinesCount != 0) {
+					auto& first = trashLines.front();
+					if (!noClear) {
+						if (attack <= 0) break;
+						auto offset = std::min(attack, first);
+						attack -= (first -= offset, offset);
+						trashLinesCount = std::max(trashLinesCount - offset, 0);
+						if (first <= 0)
+							trashLines.pop_front();
+					}
+					else {
+						trashLinesCount = std::max(trashLinesCount - first, 0);
+						addCount += first;
+						addLines(first);
 						trashLines.pop_front();
+					}
 				}
-				else {
-					trashLines.pop_front();
-					addCount += first;
-					addLines(first);
+				if (noClear && addCount > 0) {
+					trashLinesCount = 0;
+					map.update(false);
+					for (auto& piecePos : pieceChanges)
+						piecePos.y += addCount;
 				}
-			}
-			if (noClear && addCount > 0) {
-				trashLinesCount = 0;
-				map.update(false);
-				for (auto& piecePos : pieceChanges)
-					piecePos.x -= addCount;
 			}
 			attack = std::max(0, attack);
+			if (opponent != nullptr && attack != 0) {
+				std::lock_guard guard(opponent->mtx);
+				std::get<versus>(opponent->gm).addTrash(attack);
+			}
+		}
+
+		void addTrash(int attack) {
+			trashLines.push_back(attack);
+			trashLinesCount += attack;
 		}
 	};
 
@@ -182,18 +202,22 @@ protected:
 		std::size_t b2b = 0;
 		std::size_t combo = 0;
 		std::size_t pieces = 0;
+		std::size_t attack = 0;
 		bool comboState = false;
 		bool isReplay = false;
 		bool deaded = false;
+		std::string clearTextInfo{};
 		std::vector<Pos> pieceChanges{};
 	};
 
+	std::mutex mtx;
 	int dySpawn = -18;
-	Random rS;
+	std::size_t mode = 0;
+	TetrisGame* opponent = nullptr;
+	Random rS{};
 	Hold hS;
 	gameData gd;
-	using playing_mode = std::in_place_index_t<0>;
-	std::variant<Modes::versus, Modes::dig, Modes::sprint> gm{ playing_mode()};
+	std::variant<Modes::versus, Modes::dig, Modes::sprint> gm;
 	TetrisMapEx map{ 10, 40 };
 	TetrisNode tn{ TetrisNode::spawn(rS.getOne(),&map,dySpawn) };
 	Recorder record{ rS.seed }, recordPath{ rS.seed };
@@ -201,6 +225,7 @@ protected:
 
 public:
 	TetrisGame() {
+		restart();
 	}
 
 	void opers(Oper a);
@@ -214,7 +239,8 @@ public:
 	void ccw();
 	void cw();
 	void restart();
-
+	void switchMode(std::size_t , bool = false);
+	
 	friend struct Modes::versus;
 	friend struct Modes::dig;
 	friend struct Modes::sprint;

@@ -4,7 +4,12 @@
 #include <vector>
 #include "tetrisGame.h"
 #include "tetrisCore.h"
+#include "threadPool.h"
+#include <vector>
 #include <iostream>
+
+static unsigned short thread_num = 1;
+
 #define USE_CONSOLE 0
 BOOL APIENTRY DllMain(HMODULE hModule,
                        DWORD  ul_reason_for_call,
@@ -41,10 +46,11 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 #define DECLSPEC_EXPORT __declspec(dllexport)
 #define WINAPI __stdcall
 
-
 extern "C" DECLSPEC_EXPORT char const* WINAPI Name()
 {
-    static std::string name = "test1";
+    static std::string name = "test";
+    if (thread_num > 1)
+        name += "_t" + std::to_string(thread_num);
     return name.c_str();
 }
 
@@ -56,7 +62,9 @@ extern "C" DECLSPEC_EXPORT int __cdecl AIDllVersion()
 extern "C" DECLSPEC_EXPORT char* __cdecl AIName(int level)
 {
     static char name[200];
-    static std::string name1 = "test1";
+    static std::string name1 = "test";
+    if (thread_num > 1) 
+		name1 += "_t" + std::to_string(thread_num);
     strcpy_s(name, name1.c_str());
     return name;
 }
@@ -133,21 +141,8 @@ extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], 
 		map[d] = overfield[s];
 	}
 
-#if USE_TEST
-    for (size_t d = 23, s = 0; s < 8; ++d, ++s)
-    {
-      //  map.data[map.height - 23 - (8 - s)] = overfield[s];
-    }
-#endif
-
     auto drawField = [&](TetrisMap&map) {
-        for (int i = 0; i < map.height; i++) {//draw field
-            for (int j = 0; j < map.width; j++)
-            {
-                std::cout << (map(i, j) ? "[]" : "  ");
-            }
-            std::cout << "\n";
-        }
+		std::cout << map << "\n";
     };
 
     //drawField(map);
@@ -166,45 +161,71 @@ extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], 
     v.cur = typeConvert(active);
     auto dySpawn = -18;
 	auto node = TetrisNode::spawn(v.cur, &map, dySpawn);
-    for (auto it = next; *it != '\0'; it++) { v.nexts.push_back(typeConvert(*it)); }
+    for (auto it = next; *it != '\0'; it++) { 
+        v.nexts.push_back(typeConvert(*it)); 
+    }
+
+//#define USE_OUTPUT_INFO
+#ifdef USE_OUTPUT_INFO
+    std::cout << "preview:";
+    for (auto it : v.nexts) {
+        std::cout << it;
+    }
+#endif
 	v.hold = (hold == ' ') ? std::nullopt : std::make_optional(typeConvert(hold));
     v.b2b = b2b;
     v.combo = combo;
 	v.upcomeAtt = upcomeAtt;
     v.canHold = curCanHold;
 
-    auto call = [&](TetrisNode &start, TetrisMap &field, const int limitTime) {
+    static ThreadPool threadPool{ thread_num };
+
+    auto call = [&](TetrisNode &start, TetrisMap &field, const int limitTime) -> std::vector<Oper>{
         using std::chrono::high_resolution_clock;
         using std::chrono::milliseconds;
-        //static
-            TreeContext ctx;
+       static 
+            TreeContext<TreeNode> ctx;
         auto dp = std::vector(v.nexts.begin(), v.nexts.end());
-		ctx.createRoot(start, field, dp, v.hold, v.canHold, !!v.b2b, v.combo, v.upcomeAtt, dySpawn);
-        auto now = high_resolution_clock::now(), end = now + milliseconds(limitTime);
-        do {
-            ctx.run();
-        } while ((now = high_resolution_clock::now()) < end);
-        auto [best, ishold] = ctx.getBest();
-        std::vector<Oper>path;
+		ctx.createRoot(start, field, dp, v.hold, v.canHold, !!v.b2b, v.combo, dySpawn);
+        auto end = high_resolution_clock::now() + milliseconds(limitTime);
+        auto taskrun = [&]() {
+            do {
+                ctx.run();
+            } while (high_resolution_clock::now() < end);
+        };
+        std::vector<std::future<void>> futures;
+        auto thm = threadPool.get_idl_num();
+		for (auto i = 0; i < thm - 1; i++)
+            futures.emplace_back(threadPool.commit(taskrun));
+        taskrun();
+        for (auto& run : futures)
+            run.wait();
+        auto [best, ishold] = ctx.getBest(v.upcomeAtt);
+#ifdef USE_OUTPUT_INFO
+		std::cout << "nodes:" << ctx.count << "\n";
+#endif
+        std::vector<Oper> path;
+        if (best == nullptr)  
+            goto end;
         if (!ishold) {
-			path = Search::make_path(start, best, field, true);
+			path = Search::make_path(start, *best, field, false);
         }
         else {
             auto holdNode = TetrisNode::spawn(v.hold ? *v.hold : dp.front(), &map, dySpawn);
-			path = Search::make_path(holdNode, best, field, true);
+			path = Search::make_path(holdNode, *best, field, false);
             path.insert(path.begin(), Oper::Hold);
         }
-        if (path.empty()) path.push_back(Oper::HardDrop);
+        end:
+        if (path.empty()) 
+            path.push_back(Oper::HardDrop);
         return path;
     };
 
 	auto path = call(node, map, time_t(std::pow(base_time, level)));
     auto pathStr = operConvert(path);
-  //  std::cout << path<<"\n";
     std::memcpy(result, pathStr.data(), pathStr.size());
     result += pathStr.size();
     result[0] = '\0';
-    //printf("%s", result_buffer[player]);
     return result_buffer[player];
 }
 

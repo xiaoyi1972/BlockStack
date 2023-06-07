@@ -1,4 +1,4 @@
-#include "TetrisBase.h"
+#include "tetrisBase.h"
 
 namespace std {
 	std::string to_string(const Oper& a) {

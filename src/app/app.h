@@ -2,7 +2,6 @@
 
 #include "resource.h"
 
-
 #ifndef Assert
 #if defined( DEBUG ) || defined( _DEBUG )
 #define Assert(b) do {if (!(b)) {OutputDebugStringA("Assert: " #b "\n");}} while(0)

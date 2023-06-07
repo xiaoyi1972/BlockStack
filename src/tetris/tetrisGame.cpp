@@ -1,19 +1,26 @@
 ﻿#include "tetrisGame.h"
 
 void Random::getBag() {
-    constexpr bool  test = false;
-	if constexpr (test) {
-        //bag = std::vector<Piece>{ 7 , Piece::I };
-		bag = { Piece::L,Piece::I,Piece::L,Piece::I,Piece::L,Piece::I,Piece::L };
+	if constexpr (My::test) {
+        bag = std::vector<Piece>{ 7 , Piece::L };
+		//bag = { Piece::O, Piece::I, Piece::T, Piece::L, Piece::J, Piece::S, Piece::Z };
+        //bag = { Piece::O, Piece::T, Piece::Z, Piece::S, Piece::I, Piece::L, Piece::J };
+        //bag = { Piece::S, Piece::T, Piece::J, Piece::Z, Piece::I, Piece::O, Piece::L };
+        //bag = { Piece::T, Piece::J, Piece::S, Piece::Z, Piece::I, Piece::L, Piece::O};
+        //bag = { Piece::I, Piece::Z, Piece::J, Piece::T, Piece::S, Piece::O, Piece::L };
         return;
     }
     else {
         std::vector<Piece> bagSets{ Piece::O, Piece::I, Piece::T, Piece::L, Piece::J, Piece::S, Piece::Z };
         while (bag.size() < 7) {
+//#define CLASSIC
             auto it = std::next(bagSets.begin(), randGen() % bagSets.size());
             auto piece = *it;
+#ifndef  CLASSIC
             bagSets.erase(it);
+#endif
             bag.push_back(piece);
+#undef CLASSIC
         }
 	}
 }
@@ -131,19 +138,43 @@ auto Recorder::isEnd() {
 }
 
 int TetrisGame::sendTrash(const std::tuple<TSpinType, int, bool, int> &status) {
-    auto [spin, clear, b2b, combo] = status;
+	static std::array clearsInfo{ "", "", "double", "triple", "tetris" };
+    auto &[spin, clear, b2b, combo] = status;
     int attackTo = 0;
     int clears[] {0, 0, 1, 2, 4};
+    gd.clearTextInfo.clear();
     if (spin != TSpinType::None) {
+        gd.clearTextInfo += "TSpin";
         switch (clear) {
         case 1: attackTo += ((spin == TSpinType::TSpinMini ? 1 : 2) + b2b); break;
         case 2: attackTo += (4 + b2b); break;
         case 3: attackTo += (b2b ? 6 : 8); break;
         default: break;
         }
-    } else attackTo += (clears[clear] + (clear == 4 ? b2b : 0));
-	if (map.count == 0) attackTo += 6;
-	if (combo > 0) attackTo += Modes::versus::comboTable[std::min<int>(combo - 1, Modes::versus::comboTable.size() - 1)];
+        gd.clearTextInfo += std::to_string(clear);
+        gd.clearTextInfo += " ";
+    }
+    else {
+        attackTo += (clears[clear] + (clear == 4 ? b2b : 0));
+        gd.clearTextInfo += clearsInfo[clear];
+		if (!gd.clearTextInfo.empty()) 
+            gd.clearTextInfo += " ";
+    }
+	if (clear > 0 && b2b)
+        gd.clearTextInfo += "b2b ";
+    if (map.count == 0) {
+        attackTo += 6;
+        gd.clearTextInfo += "Perfect Clear ";
+    }
+    if (combo > 0) {
+        attackTo += Modes::versus::comboTable[std::min<int>(combo, Modes::versus::comboTable.size() - 1)];
+		gd.clearTextInfo += "combo" + std::to_string(combo);
+    }
+
+    if (attackTo > 0) {
+		gd.clearTextInfo = "+" + std::to_string(attackTo) + " " + gd.clearTextInfo;
+    }
+
     return attackTo;
 }
 
@@ -253,34 +284,69 @@ void TetrisGame::hardDrop() {
             it->y -= dec; ++it; 
         }
     }
-    gd.pieceChanges = pieceChanges;
+
     if (clear.size() == 4 || (clear.size() > 0 && tn.typeTSpin != TSpinType::None))  gd.b2b++;
     else if (clear.size() > 0) gd.b2b = 0;
     gd.combo = clear.size() > 0 ? gd.combo + 1 : 0;
-    auto attack = sendTrash(std::tuple<TSpinType, int, bool, int> {tn.typeTSpin, clear.size(), gd.b2b > 1, gd.combo});
+	auto attack = sendTrash(std::tuple<TSpinType, int, bool, int> {TSpinType(tn.typeTSpin), clear.size(), gd.b2b > 1, gd.combo - 1});
     gd.pieces++;
     gd.clear += clear.size();
     auto piece = rS.getOne();
     tn = TetrisNode::spawn(piece,&map, dySpawn);
 
     std::visit(overloaded{
-	 [&] (Modes::sprint &arg){},
-     [&, &clear = clear, &pieceChanges = pieceChanges](Modes::dig &arg) {arg.handle(this, clear, pieceChanges); },
-     [&, &clear = clear, &pieceChanges = pieceChanges](Modes::versus &arg) {
+     [&](Modes::sprint& arg) {},
+     [&, &clear = clear, &pieceChanges = pieceChanges](Modes::dig& arg) {arg.handle(this, clear, pieceChanges); },
+     [&, &clear = clear, &pieceChanges = pieceChanges](Modes::versus& arg) {
+     gd.attack += attack;
      arg.handle(this, clear.size() == 0, attack, pieceChanges); },
      }, gm);
+
+    gd.pieceChanges = pieceChanges;
 
     if (!tn.check(map)) //check is dead
         gd.deaded = true;
 }
 
 void TetrisGame::restart() {
-     rS = Random{};
-     hS = Hold{};
-	 gd = gameData{};
+	rS = Random{}, hS = Hold{}, gd = gameData{};
     map = TetrisMapEx{ 10, 40 };
-    tn = TetrisNode { TetrisNode::spawn(rS.getOne(),&map,dySpawn) };
-    new(&gm) decltype(gm){playing_mode{}};
+    tn = TetrisNode{ TetrisNode::spawn(rS.getOne(),&map,dySpawn) };
+    switchMode(mode, true);
+    if constexpr (My::test) {
+        //map[17] = 0101010101_r;
+        map[16] = 1010101010_r;
+       // map[17] = 1111101101_r;
+       // map[16] = 1111111110_r;
+        map[15] = 1111111110_r;
+        map[14] = 1011111111_r;
+        map[13] = 1011111111_r;
+        map[12] = 1011111111_r;
+        map[11] = 1111101110_r;
+        map[10] = 1111101111_r;
+        map[9] = 1111111001_r;
+        map[8] = 1110111111_r;
+        map[7] = 1110111111_r;
+        map[6] = 1011111111_r;
+        map[5] = 1011111011_r;
+        map[4] = 1111111011_r;
+        map[3] = 1100111111_r;
+        map[2] = 1011111111_r;
+        map[1] = 0111111111_r;
+        map[0] = 1011111111_r;
+        map.update(true);
+        if (mode == 0)
+            std::get<Modes::versus>(gm).addTrash(0);
+    }
 }
 
-
+void TetrisGame::switchMode(std::size_t type, bool apply) {
+	if (!apply)
+		mode = type;
+	else
+		switch (type) {
+		case 0:  new(&gm) decltype(gm){Modes::versus{}}; break;
+		case 1:  new(&gm) decltype(gm){Modes::sprint{}}; break;
+		case 2:  new(&gm) decltype(gm){Modes::dig{}}; break;
+		}
+}

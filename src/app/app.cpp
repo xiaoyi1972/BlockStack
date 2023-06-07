@@ -2,8 +2,8 @@
 //
 
 #include "framework.h"
-#include "Engine.h"
-#include "App.h"
+#include "engine.h"
+#include "app.h"
 
 #pragma comment(lib, "d2d1")
 #pragma comment (lib ,"imm32.lib")
@@ -32,14 +32,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 
 MainApp::MainApp() : m_hwnd(NULL)
 {
-	engine = new Engine();
-	constexpr bool USE_CONSOLE = true ^ 1;
+	constexpr bool USE_CONSOLE = true ^ 0;
 	if constexpr (USE_CONSOLE) {
 		FILE* stream1;
 		AllocConsole();
 		freopen_s(&stream1, "CONOUT$", "w+t", stdout);
 		freopen_s(&stream1, "CONIN$", "r+t", stdin);
 	}
+	engine = new Engine();
 }
 
 
@@ -87,6 +87,19 @@ void MainApp::RunMessageLoop()
 
 HRESULT MainApp::Initialize()
 {
+	HMENU hMenu = CreateMenu();
+	HMENU hMenu_1 = CreateMenu();
+	AppendMenu(hMenu_1, 0, 2, L"对战");
+	AppendMenu(hMenu_1, 0, 3, L"竞速");
+	AppendMenu(hMenu_1, 0, 4, L"挖掘");
+	AppendMenu(hMenu, MF_POPUP, (UINT)hMenu_1, L"模式");
+	MENUITEMINFO mii = { 0 };
+	mii.cbSize = sizeof(MENUITEMINFO);
+	mii.fMask = MIIM_STATE;
+	GetMenuItemInfo(hMenu_1, 2, false, &mii);
+	mii.fState |= MFS_CHECKED;
+	SetMenuItemInfo(hMenu_1, 2, false, &mii);
+
 	HRESULT hr = S_OK;
 	WNDCLASSEX wcex = { sizeof(WNDCLASSEX) }; // Register the window class.
 	wcex.style = CS_HREDRAW | CS_VREDRAW;
@@ -109,7 +122,7 @@ HRESULT MainApp::Initialize()
 		RESOLUTION_X,
 		RESOLUTION_Y,
 		NULL,
-		NULL,
+		hMenu,//NULL,
 		HINST_THISCOMPONENT,
 		this
 	);
@@ -229,6 +242,14 @@ LRESULT CALLBACK MainApp::WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM
 			case WM_RBUTTONDOWN:
 			{
 				pMainApp->engine->MouseButtonDown(false, true);
+			}
+			result = 0;
+			wasHandled = true;
+			break;
+
+			case WM_COMMAND:
+			{
+				pMainApp->engine->Command(wParam);
 			}
 			result = 0;
 			wasHandled = true;
