@@ -1,5 +1,5 @@
-# testTetris
-test Tetris
+# Piecestack
+tetris game with an autoplay bot
 # build steps
 + **precondition** cmake installed
 + configure  
