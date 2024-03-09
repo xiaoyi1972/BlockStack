@@ -2,7 +2,13 @@
 
 void Random::getBag() {
 	if constexpr (My::test) {
-        bag = std::vector<Piece>{ 7 , Piece::L };
+        //bag = std::vector<Piece>{ 7 , Piece::J };
+
+        bag = { Piece::S,Piece::J,Piece::L,Piece::O,Piece::T,Piece::Z,Piece::I };
+
+        //bag = { Piece::O,Piece::I,Piece::J,Piece::S,Piece::L,Piece::Z,Piece::T };
+        
+        //bag = { Piece::O, Piece::I, Piece::T, Piece::L, Piece::T, Piece::S, Piece::Z };
 		//bag = { Piece::O, Piece::I, Piece::T, Piece::L, Piece::J, Piece::S, Piece::Z };
         //bag = { Piece::O, Piece::T, Piece::Z, Piece::S, Piece::I, Piece::L, Piece::J };
         //bag = { Piece::S, Piece::T, Piece::J, Piece::Z, Piece::I, Piece::O, Piece::L };
@@ -52,8 +58,8 @@ int Hold::exchange(TetrisNode& cur, Random& rS, const TetrisMap& map, int dySpaw
     auto curType = cur.type;
     auto res = 0;
     if (able) {
-        if (type) {
-            std::swap(*type, curType);
+		if (type != Piece::None) {
+            std::swap(type, curType);
 			cur = TetrisNode::spawn(curType, &map, dySpawn), res = 1;
         }
         else {
@@ -117,6 +123,7 @@ std::string Recorder::writeStruct(Recorder& obj) {
 }
 
 void Recorder::add(Oper _operation, int _time) {
+    return;
     auto len = time.size();
     if (len == 0)
         firstTime = _time;
@@ -148,10 +155,10 @@ int TetrisGame::sendTrash(const std::tuple<TSpinType, int, bool, int> &status) {
         switch (clear) {
         case 1: attackTo += ((spin == TSpinType::TSpinMini ? 1 : 2) + b2b); break;
         case 2: attackTo += (4 + b2b); break;
-        case 3: attackTo += (b2b ? 6 : 8); break;
+        case 3: attackTo += (b2b ? 8 : 6); break;
         default: break;
         }
-        gd.clearTextInfo += std::to_string(clear);
+        gd.clearTextInfo += std::to_string(clear - (spin == TSpinType::TSpinMini));
         gd.clearTextInfo += " ";
     }
     else {
@@ -170,11 +177,9 @@ int TetrisGame::sendTrash(const std::tuple<TSpinType, int, bool, int> &status) {
         attackTo += Modes::versus::comboTable[std::min<int>(combo, Modes::versus::comboTable.size() - 1)];
 		gd.clearTextInfo += "combo" + std::to_string(combo);
     }
-
     if (attackTo > 0) {
 		gd.clearTextInfo = "+" + std::to_string(attackTo) + " " + gd.clearTextInfo;
     }
-
     return attackTo;
 }
 
@@ -256,18 +261,28 @@ void TetrisGame::dropToBottom() {
     }
 }
 
+TetrisNode TetrisGame::gen_piece(Piece piece) {
+    return TetrisNode::spawn(piece, &map, dySpawn);
+}
+
 void TetrisGame::hardDrop() {
-    if (!gd.isReplay)record.add(Oper::HardDrop, record.timeRecord());
+    if (!gd.isReplay)
+        record.add(Oper::HardDrop, record.timeRecord());
     hS.reset();
     auto dropDis = tn.getDrop(map);
     if (dropDis > 0) tn.lastRotate = false;
     tn.y -= dropDis;
-	if (tn.type == Piece::T && tn.lastRotate) {
+    if (tn.type == Piece::T && tn.lastRotate) {
         auto [spin, mini] = tn.corner3(map);
-        if (spin) tn.typeTSpin = mini ? TSpinType::TSpinMini : TSpinType::TSpin;
+        if (spin)
+            tn.typeTSpin = mini ? TSpinType::TSpinMini : TSpinType::TSpin;
     }
     auto [pieceChanges, clear] = tn.attachs(map);
-    std::sort(pieceChanges.begin(), pieceChanges.end(), [](auto& lhs, auto& rhs) {return lhs.y == rhs.y ? lhs.x < rhs.x : lhs.y > rhs.y; });
+    if (clear.size() > 1 && tn.typeTSpin == TSpinType::TSpinMini)
+        tn.typeTSpin = TSpinType::TSpin;
+
+    std::sort(pieceChanges.begin(), pieceChanges.end(), [](auto& lhs, auto& rhs) {
+        return lhs.y == rhs.y ? lhs.x < rhs.x : lhs.y > rhs.y; });
 	for (auto it = pieceChanges.begin(); !clear.empty() && it != pieceChanges.end(); ) {
         auto dec = 0;
         auto del = false;
@@ -284,59 +299,169 @@ void TetrisGame::hardDrop() {
             it->y -= dec; ++it; 
         }
     }
-
-    if (clear.size() == 4 || (clear.size() > 0 && tn.typeTSpin != TSpinType::None))  gd.b2b++;
-    else if (clear.size() > 0) gd.b2b = 0;
+    if (clear.size() == 4 || (clear.size() > 0 && tn.typeTSpin != TSpinType::None))  
+        gd.b2b++;
+    else if (clear.size() > 0) 
+        gd.b2b = 0;
     gd.combo = clear.size() > 0 ? gd.combo + 1 : 0;
-	auto attack = sendTrash(std::tuple<TSpinType, int, bool, int> {TSpinType(tn.typeTSpin), clear.size(), gd.b2b > 1, gd.combo - 1});
+	auto attack = sendTrash({ tn.typeTSpin,clear.size(), gd.b2b > 1, gd.combo - 1 });
     gd.pieces++;
     gd.clear += clear.size();
     auto piece = rS.getOne();
-    tn = TetrisNode::spawn(piece,&map, dySpawn);
+	tn = gen_piece(piece);
 
-    std::visit(overloaded{
-     [&](Modes::sprint& arg) {},
-     [&, &clear = clear, &pieceChanges = pieceChanges](Modes::dig& arg) {arg.handle(this, clear, pieceChanges); },
-     [&, &clear = clear, &pieceChanges = pieceChanges](Modes::versus& arg) {
-     gd.attack += attack;
-     arg.handle(this, clear.size() == 0, attack, pieceChanges); },
-     }, gm);
+	//std::osyncstream(std::cout) << " fact attack:" << attack << "\t" << gd.clearTextInfo << "\n";
+
+	std::visit(overloaded{
+	 [&](Modes::sprint& arg) {},
+	 [&, &clear = clear, &pieceChanges = pieceChanges](Modes::dig& arg) {arg.handle(this, clear, pieceChanges); },
+	 [&, &clear = clear, &pieceChanges = pieceChanges](Modes::versus& arg) {
+	 gd.attack += attack;
+	 arg.handle(this, clear.size() == 0, attack, pieceChanges); },
+	}, gm);
 
     gd.pieceChanges = pieceChanges;
 
-    if (!tn.check(map)) //check is dead
+    if (!tn.check(map)) { //check is dead
+        //std::cout << "dead:\n" << tn.mapping(map) << "\n";
         gd.deaded = true;
+    }
 }
 
 void TetrisGame::restart() {
 	rS = Random{}, hS = Hold{}, gd = gameData{};
     map = TetrisMapEx{ 10, 40 };
+
+    //map = TetrisMapEx(10, 10);
+    //dySpawn = 0;
+
     tn = TetrisNode{ TetrisNode::spawn(rS.getOne(),&map,dySpawn) };
     switchMode(mode, true);
+
     if constexpr (My::test) {
-        //map[17] = 0101010101_r;
-        map[16] = 1010101010_r;
-       // map[17] = 1111101101_r;
-       // map[16] = 1111111110_r;
-        map[15] = 1111111110_r;
-        map[14] = 1011111111_r;
-        map[13] = 1011111111_r;
-        map[12] = 1011111111_r;
-        map[11] = 1111101110_r;
-        map[10] = 1111101111_r;
-        map[9] = 1111111001_r;
+
+        //for (int i = 0; i < 18; i++)
+          //  map[i] = 0111111110_r;
+
+        //TetrisMap map(10, 40);
+        /*map[21] = 0000000010_r;
+        map[20] = 1100000011_r;
+        map[19] = 1110000011_r;
+        map[18] = 1110100111_r;
+        map[17] = 1111110111_r;
+        map[16] = 1111110111_r;
+        map[15] = 1111110111_r;
+        map[14] = 1111110111_r;
+        map[13] = 1101111111_r;
+        map[12] = 1110111111_r;
+        map[11] = 1110111111_r;
+        map[10] = 1110111111_r;
+        map[9] = 1110111111_r;
         map[8] = 1110111111_r;
-        map[7] = 1110111111_r;
-        map[6] = 1011111111_r;
-        map[5] = 1011111011_r;
-        map[4] = 1111111011_r;
-        map[3] = 1100111111_r;
+        map[7] = 1111111110_r;
+        map[6] = 1111101111_r;
+        map[5] = 1111101111_r;
+        map[4] = 1011111111_r;
+        map[3] = 1011111111_r;
         map[2] = 1011111111_r;
-        map[1] = 0111111111_r;
-        map[0] = 1011111111_r;
+        map[1] = 1111011111_r;
+        map[0] = 1111011111_r;*/
+
+
+        //map[i] = 1111111111_r ^ (1 << (i % 10));
+        //map[i] = 1111110000_r;
+        //map[0] = 1111111110_r;
+
+        /*
+        //bt cannon
+        map[6] = 1111100111_r;
+        map[5] = 1111000111_r;
+        map[4] = 1111011111_r;
+        map[3] = 1111001111_r;
+        map[2] = 1111000111_r;
+        map[1] = 1111101111_r;
+        map[0] = 1111011111_r;
+        */
+
+        
+		//dt cannon
+		/*map[6] = 0011111111_r;
+		map[5] = 0001111111_r;
+		map[4] = 1101111111_r;
+		map[3] = 1001111111_r;
+		map[2] = 1000111111_r;
+		map[1] = 1101111111_r;
+		map[0] = 1101111111_r;*/
+        
+
+        /*
+        //tst
+        map[5] = 1111100111_r;
+        map[4] = 1111000111_r;
+        map[3] = 1111011111_r;
+        map[2] = 1111001111_r;
+        map[1] = 1111001111_r;
+        //map[0] = 1111101111_r;
+        */
+
+        /*map[17] = 1000000100_r;
+        map[16] = 1000001100_r;
+        map[15] = 1000001111_r;
+        map[14] = 1100001111_r;
+        map[13] = 1000001111_r;
+        map[12] = 1101111111_r;
+        map[11] = 1101111111_r;
+        map[10] = 1101111111_r;
+        map[9] = 1101111111_r;
+        map[8] = 1101111111_r;
+        map[7] = 1111111110_r;
+        map[6] = 1111110111_r;
+        map[5] = 1111110111_r;
+        map[4] = 1111110111_r;
+        map[3]=  1111110111_r;
+        map[2] = 1011111111_r;
+        map[1] = 1011111111_r;
+        map[0] = 1011111111_r;*/
+
+
+        {
+            map[19] = 0000111100_r;
+            map[18] = 0000111100_r;
+            map[17] = 1111111110_r;
+            map[16] = 1111110111_r;
+            map[15] = 1111110111_r;
+            map[14] = 1111110111_r;
+            map[13] = 1101111111_r;
+            map[12] = 1110111111_r;
+            map[11] = 1110111111_r;
+            map[10] = 1110111111_r;
+            map[9] = 1110111111_r;
+            map[8] = 1110111111_r;
+            map[7] = 1111111110_r;
+            map[6] = 1111101111_r;
+            map[5] = 1111101111_r;
+            map[4] = 1011111111_r;
+            map[3] = 1011111111_r;
+            map[2] = 1011111111_r;
+            map[1] = 1111011111_r;
+            map[0] = 1111011111_r;
+        }
+
+        /*map[0] = 1111111110_r;
+        for (int i = 1; i < 20; i++) {
+            map[i] = 1111110000_r;
+        }*/
         map.update(true);
-        if (mode == 0)
-            std::get<Modes::versus>(gm).addTrash(0);
+
+        if (mode == 0) {
+           hS.type = Piece::I;
+           std::get<Modes::versus>(gm).addTrash(2);
+        }
+    }
+    else {
+        if (mode == 2) {
+            std::get<Modes::dig>(gm).digModAdd(this, std::get<Modes::dig>(gm).digRowUpper, true);
+        }
     }
 }
 
@@ -345,8 +470,8 @@ void TetrisGame::switchMode(std::size_t type, bool apply) {
 		mode = type;
 	else
 		switch (type) {
-		case 0:  new(&gm) decltype(gm){Modes::versus{}}; break;
-		case 1:  new(&gm) decltype(gm){Modes::sprint{}}; break;
-		case 2:  new(&gm) decltype(gm){Modes::dig{}}; break;
+		case 0:  gm = Modes::versus{}; break;
+		case 1:  gm = Modes::sprint{}; break;
+		case 2:  gm = Modes::dig{}; break;
 		}
 }

@@ -7,23 +7,23 @@
 #include "threadPool.h"
 #include <vector>
 #include <iostream>
+#include <algorithm>
+#include <execution>
 
-static unsigned short thread_num = 1;
+
+static const unsigned int threads = 2u;
 
 #define USE_CONSOLE 0
-BOOL APIENTRY DllMain(HMODULE hModule,
-                       DWORD  ul_reason_for_call,
-                       LPVOID lpReserved
-                     )
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
-    FILE* stream1;
+    FILE* stream;
     switch (ul_reason_for_call)
     {
     case DLL_PROCESS_ATTACH:
 #if USE_CONSOLE
         AllocConsole();
-        freopen_s(&stream1,"CONOUT$", "w+t", stdout);
-        freopen_s(&stream1,"CONIN$", "r+t", stdin);
+        freopen_s(&stream,"CONOUT$", "w+t", stdout);
+        freopen_s(&stream,"CONIN$", "r+t", stdin);
 #endif
     case DLL_THREAD_ATTACH:
     case DLL_THREAD_DETACH:
@@ -49,8 +49,8 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 extern "C" DECLSPEC_EXPORT char const* WINAPI Name()
 {
     static std::string name = "test";
-    if (thread_num > 1)
-        name += "_t" + std::to_string(thread_num);
+    if (threads > 1)
+        name += "_t" + std::to_string(threads);
     return name.c_str();
 }
 
@@ -63,59 +63,98 @@ extern "C" DECLSPEC_EXPORT char* __cdecl AIName(int level)
 {
     static char name[200];
     static std::string name1 = "test";
-    if (thread_num > 1) 
-		name1 += "_t" + std::to_string(thread_num);
+    if (threads > 1) 
+		name1 += "_t" + std::to_string(threads);
     strcpy_s(name, name1.c_str());
     return name;
 }
+
+
+auto typeConvert(char type) {
+    auto result = Piece::None;
+    switch (type) {
+    case 'O':result = Piece::O; break;
+    case 'T':result = Piece::T; break;
+    case 'L':result = Piece::L; break;
+    case 'J':result = Piece::J; break;
+    case 'S':result = Piece::S; break;
+    case 'Z':result = Piece::Z; break;
+    case 'I':result = Piece::I; break;
+    }
+    return result;
+};
+
+auto operConvert(std::vector<Oper>& path) {
+    std::string a;
+    a.reserve(path.size());
+    for (auto x : path) {
+        switch (x) {
+        case Oper::Left: a += "l"; break;
+        case Oper::Right: a += "r"; break;
+        case Oper::SoftDrop: a += "d"; break;
+        case Oper::HardDrop: a += "V"; break;
+        case Oper::Hold: a += "v"; break;
+        case Oper::Cw: a += "z"; break;
+        case Oper::Ccw: a += "c"; break;
+        case Oper::DropToBottom: a += "D"; break;
+        default: break;
+        }
+    }
+    return a;
+};
+
+static auto dealMap(int overfield[], int field[], TetrisMap& map) {
+    for (size_t d = 0, s = 22; d < 23; ++d, --s)
+    {
+        map[d] = field[s];
+    }
+    for (size_t d = 23, s = 0; s < 8; ++d, ++s)
+    {
+        map[d] = overfield[s];
+    }
+    map.update();
+};
+
 
 extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], int field_w, int field_h, int b2b,
     int combo, char next[], char hold, bool curCanHold, char active, int x, int y, int spin, bool canhold, 
     bool can180spin, int upcomeAtt, int comboTable[], int maxDepth, int level, int player)
 {
     double const base_time = std::pow(100, 1.0 / 8);
-    auto typeConvert = [](char type) {
-        auto result = Piece::None;
-        switch (type) {
-        case 'O':result = Piece::O; break;
-        case 'T':result = Piece::T; break;
-        case 'L':result = Piece::L; break;
-        case 'J':result = Piece::J; break;
-        case 'S':result = Piece::S; break;
-        case 'Z':result = Piece::Z; break;
-        case 'I':result = Piece::I; break;
-        }
-        return result;
-    };
-
-    auto operConvert = [](std::vector<Oper>& path) {
-        std::string a;
-        for (auto x : path) {
-            switch (x) {
-            case Oper::Left: a += "l"; break;
-            case Oper::Right: a += "r"; break;
-            case Oper::SoftDrop: a += "d"; break;
-            case Oper::HardDrop: a += "V"; break;
-            case Oper::Hold: a += "v"; break;
-            case Oper::Cw: a += "z"; break;
-            case Oper::Ccw: a += "c"; break;
-            case Oper::DropToBottom: a += "D"; break;
-            default: break;
-            }
-        }
-        return a;
-    };
-
     static char result_buffer[8][1024];
     char* result = result_buffer[player];
 
+    /*TetrisDelegator::GameState v;
+    TetrisDelegator::OutInfo tag;
+    v.field.emplace<TetrisMap>(10, 40);
+    v.bag.emplace<std::vector<Piece>>();
+
+    auto& map = v.field();
+    auto& bag = v.bag();
+
+    
+    v.bag->push_back(Piece::T);
+
+    //bag.push_back(Piece::T);
+
+    type_all_t<TetrisMap> m_test;
+    TetrisMap m(10, 20);
+    const TetrisMap* m_ptr = &m;
+    m_test = m_ptr;
+
+    TetrisMap& p = m_test;*/
+
+
+
+
+#ifndef UNIT
     if (field_w != 10 || field_h != 22)
     {
         *result = '\0';
         return result;
     }
 
-    TetrisMapEx map{ 10, 40 };
+    //TetrisMap map{ 10, 40 };
 
 #if USE_TEST
     for (size_t d = 0; d < 23; ++d)
@@ -132,100 +171,174 @@ extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], 
     printf("============\n");
 #endif
 
-	for (size_t d = 0, s = 22; d < 23; ++d, --s)
-	{
-		map[d] = field[s];
-	}
-	for (size_t d = 23, s = 0; s < 8; ++d, ++s)
-	{
-		map[d] = overfield[s];
-	}
-
-    auto drawField = [&](TetrisMap&map) {
-		std::cout << map << "\n";
-    };
-
-    //drawField(map);
-    map.update();
-    struct {
+    /*struct State {
+        TetrisMap map{ 10, 40 };
         std::vector<Piece> nexts;
-		std::optional<Piece> hold;
+		Piece hold;
         Piece cur;
         int b2b;
         int combo;
         int upcomeAtt;
         bool canHold;
-    }v;
-   // printf("x %d y %d spin %d",x,y, spin);
 
-    v.cur = typeConvert(active);
-    auto dySpawn = -18;
-	auto node = TetrisNode::spawn(v.cur, &map, dySpawn);
+        bool operator==(const State& rhs) const {
+            return map == rhs.map &&
+                nexts == rhs.nexts &&
+                hold == rhs.hold &&
+                cur == rhs.cur &&
+                b2b == rhs.b2b &&
+                combo == rhs.combo &&
+                canHold == rhs.canHold;
+        }
+	}v;*/
+
+
+    TetrisDelegator::GameState v;
+    TetrisDelegator::OutInfo tag;
+
+	v.field.emplace<TetrisMap>(10, 40);
+    v.bag.emplace<std::vector<Piece>>();
+
+//#define USE_OUTPUT_INFO1
+#ifdef USE_OUTPUT_INFO1
+    static std::ostringstream os;
+#endif
+
+    dealMap(overfield, field, v.field);
+    auto cur_type = typeConvert(active);
+    v.dySpawn = -18;
+	v.cur = TetrisNode::spawn(cur_type, &v.field(), v.dySpawn);
+
     for (auto it = next; *it != '\0'; it++) { 
-        v.nexts.push_back(typeConvert(*it)); 
+		v.bag->emplace_back(typeConvert(*it));
     }
 
-//#define USE_OUTPUT_INFO
 #ifdef USE_OUTPUT_INFO
     std::cout << "preview:";
     for (auto it : v.nexts) {
         std::cout << it;
     }
 #endif
-	v.hold = (hold == ' ') ? std::nullopt : std::make_optional(typeConvert(hold));
+	v.hold = (hold == ' ') ? Piece::None : typeConvert(hold);
     v.b2b = b2b;
     v.combo = combo;
-	v.upcomeAtt = upcomeAtt;
+	v.upAtt = upcomeAtt;
     v.canHold = curCanHold;
 
-    static ThreadPool threadPool{ thread_num };
+
+#ifdef USE_OLD_RUN
+    static dp::thread_pool<> pool{ thread_num };
+    //static State prev;
+#else
+    static TetrisDelegator bot = TetrisDelegator::launch({
+    .use_static = true,
+    .delete_byself = true,
+    .thread_num = threads
+        });
+#endif
+
 
     auto call = [&](TetrisNode &start, TetrisMap &field, const int limitTime) -> std::vector<Oper>{
-        using std::chrono::high_resolution_clock;
-        using std::chrono::milliseconds;
-       static 
-            TreeContext<TreeNode> ctx;
+//#define USE_OLD_RUN
+#ifndef USE_OLD_RUN
+        bot.run(v, limitTime);
+        auto path = bot.suggest(v, tag);
+        if (!path) {
+            path = std::vector<Oper>{ Oper::HardDrop };
+        }
+
+#ifdef USE_OUTPUT_INFO1
+        os << tag.landpoint->mapping(field);
+        os << tag.info << "\n";
+#endif
+        return *path;
+
+#else
+        static 
+            TreeContext<TreeNode> ctx(true);
+
         auto dp = std::vector(v.nexts.begin(), v.nexts.end());
-		ctx.createRoot(start, field, dp, v.hold, v.canHold, !!v.b2b, v.combo, dySpawn);
-        auto end = high_resolution_clock::now() + milliseconds(limitTime);
+        auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limitTime);
+
+        auto out_exec = lambda_to_pointer_from<&TreeContext<TreeNode>::save>([&](auto fn_p, auto ...args) {
+            std::vector<std::future<void>> futures;
+            futures.reserve(thread_num);
+            for (auto i = 0; i < thread_num; i++)
+                futures.emplace_back(pool.enqueue(fn_p, &ctx, args...));
+            for (auto& run : futures)
+                run.wait();
+            });
+
+		auto last = ctx.createRoot(start, field, dp, v.hold, v.canHold, !!v.b2b, v.combo, dySpawn, out_exec);
         auto taskrun = [&]() {
             do {
                 ctx.run();
-            } while (high_resolution_clock::now() < end);
+            } while (std::chrono::steady_clock::now() < end);
         };
+
+        /*if (last && last->parent) {
+			auto tasksave = [&](TreeContext<TreeNode>* context, TreeNode* node) { context->save(node); };
+            std::vector<std::future<void>> futures;
+            for (auto i = 0; i < thread_num; i++) {
+                futures.emplace_back(pool.enqueue(tasksave, &ctx, last->parent)); 
+            }
+            for (auto& run : futures) {
+                run.wait();
+            }
+        }*/
+
         std::vector<std::future<void>> futures;
-        auto thm = threadPool.get_idl_num();
-		for (auto i = 0; i < thm - 1; i++)
-            futures.emplace_back(threadPool.commit(taskrun));
-        taskrun();
+		for (auto i = 0; i < thread_num; i++)
+            futures.emplace_back(pool.enqueue(taskrun));
+
+		TreeContext<TreeNode>::treeDelete(last);
+
         for (auto& run : futures)
             run.wait();
         auto [best, ishold] = ctx.getBest(v.upcomeAtt);
 #ifdef USE_OUTPUT_INFO
 		std::cout << "nodes:" << ctx.count << "\n";
 #endif
+
         std::vector<Oper> path;
         if (best == nullptr)  
             goto end;
+
+#ifdef USE_OUTPUT_INFO1
+        os << best->mapping(field);
+        os << ctx.info << "\n";
+#endif
+
         if (!ishold) {
 			path = Search::make_path(start, *best, field, false);
         }
         else {
-            auto holdNode = TetrisNode::spawn(v.hold ? *v.hold : dp.front(), &map, dySpawn);
+			auto holdNode = TetrisNode::spawn(v.hold != Piece::None ? v.hold : dp.front(), &field, dySpawn);
 			path = Search::make_path(holdNode, *best, field, false);
             path.insert(path.begin(), Oper::Hold);
         }
         end:
-        if (path.empty()) 
+        if (path.empty()) {
             path.push_back(Oper::HardDrop);
+        }
         return path;
+#endif
     };
 
-	auto path = call(node, map, time_t(std::pow(base_time, level)));
+	auto path = call(v.cur, v.field, time_t(std::pow(base_time, level)));
     auto pathStr = operConvert(path);
+
+#ifdef USE_OUTPUT_INFO1
+    os << active << "[" << hold << "]" << " " << next << "\n";
+    os << "upAtt:" << upcomeAtt << " path:" << pathStr <<"\n\n";
+    std::cout << os.str();
+    os.str("");
+#endif
+
     std::memcpy(result, pathStr.data(), pathStr.size());
     result += pathStr.size();
     result[0] = '\0';
+#endif
     return result_buffer[player];
 }
 

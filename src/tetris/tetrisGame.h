@@ -20,6 +20,10 @@
 #include<random>
 #include"tetrisBase.h"
 
+#include<syncstream>
+
+//#define CLASSIC
+
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; }; // helper type for the visitor #4
 template<class... Ts> overloaded(Ts...)->overloaded<Ts...>; // explicit deduction guide (not needed as of C++20)
 
@@ -34,6 +38,8 @@ public:
 	std::default_random_engine randGen;
 
 	Random(unsigned _seed = std::chrono::system_clock::now().time_since_epoch().count()) :seed(_seed) {
+		//std::cout << "_seed:" << _seed << "\n";
+		//seed = 3366990943;
 		randGen.seed(seed);
 	}
 
@@ -45,9 +51,9 @@ public:
 class Hold {
 public:
 	bool able;
-	std::optional<Piece>  type;
+	Piece type;
 
-	Hold() :able(true), type(std::nullopt) {
+	Hold() :able(true), type(Piece::None) {
 		if constexpr (My::test) {
 			//type = Piece::L;
 		}
@@ -81,7 +87,8 @@ public:
 
 namespace Modes {
 	struct dig {
-		int digRows = 10;
+		int digRows = digRowUpper;
+		int digRowUpper = 15;
 		int digRowsEnd = 100;
 
 		template<class T>
@@ -103,7 +110,7 @@ namespace Modes {
 					map.colorDatas[0][num] = Piece::None;
 				}
 			}
-			digRows = 10;
+			digRows = digRowUpper;
 			map.update();
 		}
 
@@ -112,14 +119,14 @@ namespace Modes {
 			auto& map = tg->map;
 			if (digRowsEnd > 0) {
 				for (auto& row_i : clear) {
-					if (row_i < std::min(digRows, 10))
+					if (row_i < std::min(digRows, digRowUpper))
 						digRows--;
 				}
 				if (clear.size() == 0) {
-					auto needDigRows = 10 - digRows;
+					auto needDigRows = digRowUpper - digRows;
 					digRowsEnd -= needDigRows;
 					digModAdd(tg, needDigRows, false);
-					digRows = 10;
+					digRows = digRowUpper;
 					for (auto& piecePos : pieceChanges)
 						piecePos.y += needDigRows;
 				}
@@ -240,10 +247,11 @@ public:
 	void cw();
 	void restart();
 	void switchMode(std::size_t , bool = false);
-	
+	TetrisNode gen_piece(Piece);
+
 	friend struct Modes::versus;
 	friend struct Modes::dig;
 	friend struct Modes::sprint;
 };
 
-#endif // TETRISGAME_H
+#endif

@@ -1,4 +1,5 @@
 #pragma once
+
 #include<stdlib.h>
 #include<atomic>
 #include<cstring>
@@ -6,57 +7,471 @@
 #include<tuple>
 #include<type_traits>
 #include<utility>
+#include<cmath>
+#include<variant>
+#include<semaphore>
 
-template<std::size_t...I, class F>
-constexpr auto with_sequence_impl(F&& func, std::index_sequence<I...>) {
-	return func(std::integral_constant<std::size_t, I>{}...);
-}
+//#include<semaphore>
 
-template<std::size_t N, class F>
-constexpr auto with_sequence(F&& func) {
-	return with_sequence_impl(std::forward<F>(func), std::make_index_sequence<N>{});
-}
+#ifdef _MSC_VER // for MSVC
+#define forceinline __forceinline
+#elif defined __GNUC__ // for gcc on Linux/Apple OS X
+#define forceinline __inline__ __attribute__((always_inline))
+#else
+#define forceinline
+#endif
 
-template <auto Pred, class Type, Type... I>
-struct filter_integer_sequence_impl {
-	template <class... T>
-	static constexpr auto Unpack(std::tuple<T...>) {
-		return std::integer_sequence<Type, T::value...>();
+namespace {
+
+	template <class Enum>
+	constexpr std::underlying_type_t<Enum> enum_type_value(Enum e) noexcept {
+		return static_cast<std::underlying_type_t<Enum>>(e);
 	}
 
-	template <Type Val>
-	using Keep = std::tuple<std::integral_constant<Type, Val>>;
-	using Ignore = std::tuple<>;
-	using Tuple = decltype(std::tuple_cat(std::conditional_t<(*Pred)(I), Keep<I>, Ignore>()...));
-	using Result = decltype(Unpack(Tuple()));
-};
+	template<template<class...Ts> class Container, class T>
+	using type_all_type = Container<T, T*, const T*>;
 
-template <auto Pred, class Type, Type... I>
-constexpr auto filter_integer_sequence(std::integer_sequence<Type, I...>) {
-	return typename filter_integer_sequence_impl<Pred, Type, I...>::Result();
+	template<class T>
+	using no_const_pointer_t = std::add_pointer_t<std::remove_cv_t<std::remove_pointer_t<T>>>;
+
+	template<class T>
+	struct type_all_t : public type_all_type<std::variant, T> {
+		using base_type = type_all_type<std::variant, T>;
+		using base_type::base_type;
+		using base_type::operator=;
+		using type = T;
+
+		inline static struct {
+			template<class T>
+			auto operator()(T&& arg) -> std::conditional_t<std::is_const_v<std::remove_reference_t<T>>, const type&, type&> {
+				if constexpr (std::is_pointer_v<std::decay_t<T>>)
+					return *const_cast<no_const_pointer_t<std::decay_t<T>>>(arg);
+				else
+					return arg;
+			};
+		} visitor;
+
+		operator T&() {
+			return std::visit(visitor, *this);
+		}
+
+		operator const T&() const {
+			return std::visit(visitor, *this);
+		}
+
+		T& operator()() {
+			return std::visit(visitor, *this);
+		}
+
+		const T& operator()() const {
+			return std::visit(visitor, *this);
+		}
+
+		T& operator*() {
+			return &std::visit(visitor, *this);
+		}
+
+		const T& operator*() const {
+			return std::visit(visitor, *this);
+		}
+
+		T* operator->() {
+			return &std::visit(visitor, *this);
+		}
+
+		const T* operator->() const {
+			return &std::visit(visitor, *this);
+		}
+	};
 }
 
-template <class Pred, class Type, Type... I>
-constexpr auto filter_integer_sequence(std::integer_sequence<Type, I...> sequence, Pred) {
-	return filter_integer_sequence<(Pred*)nullptr>(sequence);
+namespace std {
+	template<class T>
+	struct std::variant_size<type_all_t<T>> : std::variant_size<typename type_all_t<T>::base_type> {
+
+	};
+
+	template<std::size_t I, class T>
+	struct std::variant_alternative<I, type_all_t<T>> : std::variant_alternative<I, typename type_all_t<T>::base_type> {
+
+	};
 }
 
-template<std::size_t N>
-constexpr auto bit_seq_tuple(std::size_t v) {
-	return with_sequence<N>([&](auto...c) {
-		return std::make_tuple(1 & v >> c...);
-		});
+namespace {
+#define self * this
+	using namespace std;
+
+	class vector_stream_buffer : public streambuf {
+	private:
+		friend class vector_output_stream;
+	private:
+		string buffer;
+	public:
+		vector_stream_buffer(size_t size);
+	protected:
+		virtual streamsize xsputn(const char_type* s, streamsize count) override;
+		virtual int_type overflow(int_type character) override;
+	};
+
+	class vector_output_stream : protected vector_stream_buffer, public ostream {
+	private:
+		using string_type = add_pointer_t<const ostream::char_type>;
+	public:
+		vector_output_stream(size_t size);
+	public:
+		string str();
+	public:
+		template <typename T>
+		vector_output_stream& operator<<(T&& value);
+	public:
+		operator string_type() const noexcept;
+	};
+
+	vector_stream_buffer::vector_stream_buffer(size_t size) {
+		buffer.reserve(size);
+	}
+
+	streamsize vector_stream_buffer::xsputn(const char_type* s, streamsize count) {
+		return buffer.append(s, count), count;
+	}
+
+	vector_stream_buffer::int_type vector_stream_buffer::overflow(int_type character) {
+		return 1;
+	}
+
+	vector_output_stream::vector_output_stream(size_t size) : vector_stream_buffer(size), ostream(this) {
+
+	}
+
+	string vector_output_stream::str() {
+		return buffer;
+	}
+
+	template <typename T>
+	vector_output_stream& vector_output_stream::operator<<(T&& value) {
+		using base_reference = add_lvalue_reference_t<ostream>;
+		return static_cast<base_reference>(self) << forward<T>(value), self;
+	}
+
+	vector_output_stream::operator string_type() const noexcept {
+		return buffer.c_str();
+	}
+
+#undef self
 }
 
-template<class... Args>
-constexpr auto tuple_to_array(const std::tuple<Args...>& t) {
-	constexpr auto N = sizeof...(Args);
-	return with_sequence<N>([&](auto...c) {
-		return std::array{ std::get<c.value>(t)... };
-		});
+namespace mergesort{
+	template <auto ... Is> struct array {};
+
+	template <typename ArrayT, int INDEX>
+	struct get;
+
+	template <auto I0, auto ... Is, int INDEX>
+	struct get<array<I0, Is...>, INDEX>
+	{
+		static constexpr auto value = get<array<Is...>, INDEX - 1>::value;
+	};
+
+	template <auto I0, auto ... Is>
+	struct get<array<I0, Is...>, 0>
+	{
+		static constexpr auto value = I0;
+	};
+
+	template <typename ArrayT, int INDEX>
+	constexpr inline auto get_v = get<ArrayT, INDEX>::value;
+
+	/*
+	 * prepend
+	 */
+	template <auto I0, typename ArrayT>
+	struct prepend;
+
+	template <auto I0, auto ... Is>
+	struct prepend<I0, array<Is...>>
+	{
+		using type = array<I0, Is...>;
+	};
+
+	template <auto I0, typename ArrayT>
+	using prepend_t = typename prepend<I0, ArrayT>::type;
+
+	/*
+	 * take
+	 */
+	template <typename ArrayT, int N>
+	struct take;
+
+	template <auto I0, auto ... Is, int N>
+	struct take<array<I0, Is...>, N>
+	{
+		using type = prepend_t<I0, typename take<array<Is...>, N - 1>::type>;
+	};
+
+	template <auto I0, auto ... Is>
+	struct take<array<I0, Is...>, 1>
+	{
+		using type = array<I0>;
+	};
+
+	template <typename ArrayT, int N>
+	using take_t = typename take<ArrayT, N>::type;
+
+	/*
+	 * drop
+	 */
+	template <typename ArrayT, int N>
+	struct drop;
+
+	template <auto I0, auto ... Is, int N>
+	struct drop<array<I0, Is...>, N>
+	{
+		using type = typename drop<array<Is...>, N - 1>::type;
+	};
+
+	template <auto I0, auto ... Is>
+	struct drop<array<I0, Is...>, 1>
+	{
+		using type = array<Is...>;
+	};
+
+	template <typename ArrayT, int N>
+	using drop_t = typename drop<ArrayT, N>::type;
+
+	/*
+	 * merge
+	 */
+	template <typename Array1, typename Array2>
+	struct merge;
+
+	template <auto I0, auto ... Is, auto J0, auto ... Js>
+	struct merge<array<I0, Is...>, array<J0, Js...>>
+	{
+		using type = prepend_t<
+			(I0 <= J0 ? I0 : J0),
+			typename merge<
+			std::conditional_t<I0 <= J0, array<Is...>, array<I0, Is...>>,
+			std::conditional_t<I0 <= J0, array<J0, Js...>, array<Js...>>
+			>::type
+		>;
+	};
+
+	template <auto ... Is>
+	struct merge<array<Is...>, array<>>
+	{
+		using type = array<Is...>;
+	};
+
+	template <auto ... Js>
+	struct merge<array<>, array<Js...>>
+	{
+		using type = array<Js...>;
+	};
+
+	template <>
+	struct merge<array<>, array<>>
+	{
+		using type = array<>;
+	};
+
+	template <typename Array1, typename Array2>
+	using merge_t = typename merge<Array1, Array2>::type;
+
+	/*
+	 * sort
+	 */
+	template <typename ArrayT>
+	struct sort;
+
+	template <>
+	struct sort<array<>>
+	{
+		using type = array<>;
+	};
+
+	template <auto I>
+	struct sort<array<I>>
+	{
+		using type = array<I>;
+	};
+
+	template <auto ... Is>
+	struct sort<array<Is...>>
+	{
+	private:
+		static const int length = sizeof...(Is);
+	public:
+		using type = merge_t<
+			typename sort<take_t<array<Is...>, length / 2>>::type,
+			typename sort<drop_t<array<Is...>, length / 2>>::type
+		>;
+	};
+
+	template <typename ArrayT>
+	using sort_t = typename sort<ArrayT>::type;
 }
 
-template<class T>
+namespace {
+	template <class T>
+	struct function_traits : public function_traits<decltype(&std::remove_reference_t<T>::operator())> {};
+	template <class R, class C, class... Ts>
+	struct function_traits<R(C::*)(Ts...) const>: public function_traits<R(*)(Ts...)> {};
+	template <class R, class C, class... Ts>
+	struct function_traits<R(C::*)(Ts...)> : public function_traits<R(*)(Ts...)> {};
+	template <class R, class... Ts>
+	struct function_traits<R(*)(Ts...)> : public function_traits<R(Ts...)> {};
+	template <class R, class... Ts> struct function_traits<R(Ts...)> {
+		using result_type = R;
+		using arg_tuple = std::tuple<Ts...>;
+		using ptr = R(*)(Ts...);
+		static constexpr auto arity = sizeof...(Ts);
+	};
+
+	template<class T>
+	struct self_args_func {
+		template<class R, class...Ts>
+		struct functor_from_tuple { using type = R(*)(Ts...); };
+
+		template<class R, class...Ts>
+		struct functor_from_tuple<R, std::tuple<Ts...>> : functor_from_tuple <R, Ts...> {};
+
+		template<class T>
+		struct class_member_type;
+
+		template<class T, class U>
+		struct class_member_type<U T::*> {
+			using object_t = T;
+			using object_pointer_t = T*;
+			using member_t = U;
+		};
+
+		template<class... input_t>
+		using tuple_cat_t = decltype(std::tuple_cat(std::declval<input_t>()...));
+
+		using func_t = function_traits<T>;
+		using Self = std::tuple<T>;
+
+		using caller_from_this = std::conditional_t<std::is_member_function_pointer_v<T>, 
+			std::tuple<typename class_member_type<T>::object_pointer_t>, std::tuple<>>;
+
+		using Concat = tuple_cat_t<Self, caller_from_this, typename func_t::arg_tuple>;
+		using merged_type = functor_from_tuple<typename func_t::result_type, Concat>::type;
+	};
+
+	template<auto K>
+	using self_args_func_t = self_args_func<decltype(K)>::merged_type;
+
+	template<class T, class...Ts>
+	void initial_place_with(T& obj, Ts&&...args) {
+		std::destroy_at(&obj);
+		new (&obj) T(std::forward<Ts>(args)...);
+	}
+
+#ifdef USE_SCOPE(restore_with_noassign)
+	template<class T>
+	struct restore_with_noassign {
+		restore_with_noassign(T& obj) :
+			origin(obj), save(origin) {}
+		~restore_with_noassign() {
+			initial_place_with(origin, std::move(save));
+		}
+		T& origin;
+		T save;
+	};
+#endif
+
+	using voidfun = void(*)();
+
+	template<class F>
+	auto lambda_to_void_function(F&& lambda) -> voidfun {
+		static thread_local typename std::decay_t<F> lambda_copy = std::forward<F>(lambda);
+		if constexpr (std::is_same_v<voidfun, std::decay_t<F>>)
+			return lambda;
+		initial_place_with(lambda_copy, lambda);
+		return []() {
+			return (*std::launder(&lambda_copy))();
+		};
+	}
+
+	template<class F>
+	auto lambda_to_pointer(F&& lambda) -> typename function_traits<std::remove_reference_t<F>>::ptr {
+		static thread_local typename std::decay_t<F> lambda_copy = std::forward<F>(lambda);
+		if constexpr (std::is_same_v<typename function_traits<std::remove_reference_t<F>>::ptr, std::decay_t<F>>)
+			return lambda;
+		initial_place_with(lambda_copy, lambda);
+		return []<class...Args>(Args...args) {
+			return (*std::launder(&lambda_copy))(args...);
+		};
+	}
+
+	template<auto K, class F>
+	auto lambda_to_pointer_from(F&& lambda) -> self_args_func_t<K> {
+		static thread_local typename std::decay_t<F> lambda_copy = std::forward<F>(lambda);
+		if constexpr (std::is_same_v<self_args_func_t<K>, std::decay_t<F>>)
+			return lambda;
+		initial_place_with(lambda_copy, lambda);
+		return []<class...Args>(Args...args) {
+			return (*std::launder(&lambda_copy))(args...);
+		};
+	}
+}
+
+namespace {
+	template<std::size_t...I, class F>
+	constexpr auto with_sequence_impl(F&& func, std::index_sequence<I...>) {
+		return func(std::integral_constant<std::size_t, I>{}...);
+	}
+
+	template<std::size_t N, class F>
+	constexpr auto with_sequence(F&& func) {
+		return with_sequence_impl(std::forward<F>(func), std::make_index_sequence<N>{});
+	}
+
+	template <auto Pred, class Type, Type... I>
+	struct filter_integer_sequence_impl {
+		template <class... T>
+		static constexpr auto Unpack(std::tuple<T...>) {
+			return std::integer_sequence<Type, T::value...>();
+		}
+
+		template <Type Val>
+		using Keep = std::tuple<std::integral_constant<Type, Val>>;
+		using Ignore = std::tuple<>;
+		using Tuple = decltype(std::tuple_cat(std::conditional_t<(*Pred)(I), Keep<I>, Ignore>()...));
+		using Result = decltype(Unpack(Tuple()));
+	};
+
+	template <auto Pred, class Type, Type... I>
+	constexpr auto filter_integer_sequence(std::integer_sequence<Type, I...>) {
+		return typename filter_integer_sequence_impl<Pred, Type, I...>::Result();
+	}
+
+	template <class Pred, class Type, Type... I>
+	constexpr auto filter_integer_sequence(std::integer_sequence<Type, I...> sequence, Pred) {
+		return filter_integer_sequence<(Pred*)nullptr>(sequence);
+	}
+
+	template<std::size_t N>
+	constexpr auto bit_seq_tuple(std::size_t v) {
+		return with_sequence<N>([&](auto...c) {
+			return std::make_tuple(1 & v >> c...);
+			});
+	}
+
+	template<class... Args>
+	constexpr auto tuple_to_array(const std::tuple<Args...>& t) {
+		constexpr auto N = sizeof...(Args);
+		return with_sequence<N>([&](auto...c) {
+			return std::array{ std::get<c.value>(t)... };
+			});
+	}
+
+	template<class T, class...Ts>
+	constexpr auto any_is_same_v = (std::is_same_v<T, Ts> || ...);
+}
+
+#include<bit>
+/*template<class T>
 T BitCount(T n) {
 	n = n - ((n >> 1) & 0x55555555);
 	n = (n & 0x33333333) + ((n >> 2) & 0x33333333);
@@ -64,10 +479,15 @@ T BitCount(T n) {
 	n = n + (n >> 8);
 	n = n + (n >> 16);
 	return n & 0x3f;
-}
-template<class T, class ... Ts>
+}*/
+
+/*template<class T, class ... Ts>
 T BitCount(T first, Ts ... rest) {
-	return BitCount(first) + BitCount(rest...);
+	return std::popcount(first) + std::popcount(rest...);
+}*/
+
+auto BitCount(auto...v) {
+	return (std::popcount(static_cast<unsigned>(v)) + ...);
 }
 
 /*class Spinlock
@@ -101,22 +521,30 @@ constexpr int operator"" _r()
 	return ((value = num - '0' << n++ | value) , ...);
 }
 
-template<class T/*, std::enable_if_t<std::is_trivially_copyable_v<T>, int> = 0*/>
+inline std::string operator""_S(const char8_t* str, std::size_t) {
+	return reinterpret_cast<const char*>(str);
+}
+
+inline char const* operator""_C(const char8_t* str, std::size_t) {
+	return reinterpret_cast<const char*>(str);
+}
+
+template<class T, std::enable_if_t<std::is_trivially_copyable_v<T>, int> = 0>
 class trivail_vector {
 	private:
-		T* ptr{nullptr};
-		std::size_t capacity{0}, count{0};
+		T* ptr = nullptr;
+		std::size_t capacity = 0, count = 0;
 
-		auto grow_capcity(std::size_t capacity) {
-			return capacity < 8 ? 8 : capacity * 2;
+		forceinline auto grow_capcity(std::size_t capacity) {
+			return capacity < 8 ? 8 : capacity << 1;
 		}
 
 		bool reallocate(std::size_t oldSize, std::size_t newSize) {
 			if (newSize == 0) {
-				free(ptr);
+				std::free(ptr);
 				return false;
 			}
-			decltype(ptr) prev{nullptr};
+			decltype(ptr) prev = nullptr;
 			if (ptr = static_cast<T*>(std::realloc(prev = ptr, newSize))) {
 				return true;
 			}
@@ -135,13 +563,13 @@ class trivail_vector {
 		}
 
 		void expand() {
-				auto oldCapacity = capacity;
-				capacity = grow_capcity(oldCapacity);
-				grow_array(oldCapacity, capacity);
+			auto old_capacity = capacity;
+			capacity = grow_capcity(old_capacity);
+			grow_array(old_capacity, capacity);
 		}
 
 		void copy(T* dest, const T* src) {
-			if constexpr (std::is_trivial_v<T> == true) {
+			if constexpr (std::is_trivial_v<T>) {
 				memcpy(dest, src, type_size);
 			}
 			else {
@@ -150,7 +578,7 @@ class trivail_vector {
 		}
 
 public:
-	static const auto type_size = sizeof (T);
+	static const auto type_size = sizeof T;
 
 	class Iterator
 	{
@@ -171,7 +599,7 @@ public:
 		Iterator operator++(int) { Iterator tmp = *this; ++(*this); return tmp; }
 		Iterator& operator--() { m_ptr--; return *this; }
 		Iterator operator--(int) { Iterator tmp = *this; --(*this); return tmp; }
-		std::size_t operator-(const Iterator& n) const { return m_ptr - n.m_ptr; }
+		difference_type operator-(const Iterator& n) const { return m_ptr - n.m_ptr; }
 		Iterator& operator+=(int n) { m_ptr += n; return *this; }
 		Iterator& operator-=(int n) { m_ptr -= n; return *this; }
 		friend Iterator operator- (const Iterator& a, int n) { Iterator temp = a; return temp -= n; };
@@ -179,8 +607,8 @@ public:
 		friend Iterator operator+ (int n, const Iterator& a) { Iterator temp = a; return temp += n; };
 		friend bool operator== (const Iterator& a, const Iterator& b) { return a.m_ptr == b.m_ptr; };
 		friend bool operator!= (const Iterator& a, const Iterator& b) { return a.m_ptr != b.m_ptr; };
-		friend bool operator< (const Iterator& a, const Iterator& b) { return a.m_ptr - b.m_ptr > 0; };
-		friend bool operator> (const Iterator& a, const Iterator& b) { return a.m_ptr < b.m_ptr; };
+		friend bool operator< (const Iterator& a, const Iterator& b) { return a.m_ptr < b.m_ptr; };
+		friend bool operator> (const Iterator& a, const Iterator& b) { return a.m_ptr > b.m_ptr; };
 		friend bool operator>= (const Iterator& a, const Iterator& b) { return !(a.m_ptr < b.m_ptr); };
 		friend bool operator<= (const Iterator& a, const Iterator& b) { return !(a.m_ptr > b.m_ptr); };
 	};
@@ -190,13 +618,19 @@ public:
 		}
 
 		~trivail_vector() {
-			free(ptr);
+			std::free(ptr);
+		}
+
+		trivail_vector(std::initializer_list<T> list) {
+			count = list.size();
+			reserve(count);
+			std::memcpy(ptr, std::data(list), type_size * count);
 		}
 
 		trivail_vector(std::size_t _count) {
 			reserve(_count);
 			count = _count;
-			memset(ptr, 0, type_size * count);
+			std::memset(ptr, 0, type_size * count);
 		}
 
 		trivail_vector(const trivail_vector& p) {
@@ -211,7 +645,7 @@ public:
 				}
 				capacity = p.count;
 				count = p.count;
-				memcpy(ptr,p.ptr,p.size() * p.type_size);
+				memcpy(ptr, p.ptr, p.size() * p.type_size);
 			}
 			return *this;
 		}
@@ -221,7 +655,8 @@ public:
 		}
 
 		void reserve(std::size_t _capacity) {
-			if (ptr != nullptr) free(ptr);
+			if (ptr != nullptr) 
+				free(ptr);
 			else {
 				reallocate(type_size * capacity, type_size * _capacity);
 				capacity = _capacity;
@@ -240,7 +675,7 @@ public:
 			return capacity;
 		}
 
-		void push(const T& value) {
+		void push_back(const T& value) {
 			if (capacity < count + 1) {
 				expand();
 			}
@@ -268,7 +703,7 @@ public:
 				expand();
 			}
 			auto len = end().get() - ptr;
-			memmove(ptr + 1, ptr, len * type_size);
+			std::memmove(ptr + 1, ptr, len * type_size);
 			copy(ptr, &value);
 			count++;
 			return pos;
@@ -277,7 +712,7 @@ public:
 		Iterator erase(Iterator pos) {
 			auto ptr = pos.get();
 			auto len = end().get() - ptr;
-			memmove(ptr - 1, ptr, len * type_size);
+			std::memmove(ptr - 1, ptr, len * type_size);
 			count--;
 			return pos;
 		}
@@ -331,4 +766,130 @@ namespace bitwise {
 	inline int max(int x, int y) {
 		return x ^ ((x ^ y) & -(x < y));
 	}
+}
+
+/*struct semaphore_lock {
+	std::binary_semaphore& sem;
+	semaphore_lock(std::binary_semaphore& _sem) :sem(_sem)
+	{
+		sem.acquire();
+	}
+
+	~semaphore_lock() {
+		sem.release();
+	}
+};*/
+
+#include <atomic>
+#include <vector>
+#include <iostream>
+#include <optional>
+
+template <class T>
+class LockFreeList
+{
+public:
+	LockFreeList() :head(nullptr), m_size(0) {};
+	~LockFreeList() {
+		clear();
+	}
+
+	struct LockFreeSortedListItem
+	{
+		T value;
+		//std::atomic<LockFreeSortedListItem*> next;
+		LockFreeSortedListItem* next;
+		LockFreeSortedListItem(const T& mvalue) : value(mvalue), next(nullptr) {}
+	};
+
+	unsigned int size() {
+		return m_size.load();
+	}
+
+	void clear() {
+		LockFreeSortedListItem* p = head.load(), * n = nullptr;
+		head = nullptr;
+		while (p)
+		{
+			n = p->next;
+			p->next = nullptr;
+			delete p;
+			p = n;
+			if (!p)
+			{
+				p = head.load();
+				head = nullptr;
+			}
+		}
+		m_size.store(0);
+	}
+
+	bool push(const T& value)
+	{
+		LockFreeSortedListItem* p = head.load();
+		bool success = false;
+		if (!p)
+		{
+			head.store(new LockFreeSortedListItem(value));
+			m_size.fetch_add(1);
+			return true;
+		}
+		else {
+			LockFreeSortedListItem* newItem = new LockFreeSortedListItem(value);
+			auto n = head.load(std::memory_order_acquire);
+			newItem->next = n;
+			while (!head.compare_exchange_weak(n, newItem, std::memory_order_release, std::memory_order_relaxed));
+			m_size.fetch_add(1);
+			return true;
+		}
+		return false;
+	}
+
+	std::optional<T> pop()
+	{
+		LockFreeSortedListItem* p = head.load(std::memory_order_acquire);
+		while (p && !head.compare_exchange_weak(p, p->next/*.load(std::memory_order_acquire)*/,
+			std::memory_order_release, std::memory_order_relaxed));
+		if (!p)
+			return std::nullopt;
+		m_size.fetch_sub(1);
+		auto g = std::make_optional<T>(p->value);
+		delete p;
+		return g;
+	}
+
+	LockFreeSortedListItem* headPtr() { return head; }
+
+private:
+	std::atomic<LockFreeSortedListItem*> head;
+	std::atomic<unsigned int> m_size;
+};
+
+namespace {
+	/*
+		struct VerboseMemResource : public std::pmr::memory_resource {
+
+			VerboseMemResource(const char* name, std::pmr::memory_resource* base) :
+				m_name(name), m_resource(base) {}
+		private:
+
+			void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+				auto ptr = m_resource->allocate(bytes, alignment);
+				std::cout << "Allocating " << bytes << " bytes with '" << m_name << "':" << ptr << "\n";
+				return ptr;
+			}
+
+			void do_deallocate(void* ptr, std::size_t bytes, std::size_t alignment) override {
+				std::cout << "Deallocating " << bytes << " bytes with '" << m_name << "':" << ptr << "\n";
+				return m_resource->deallocate(ptr, bytes, alignment);
+			}
+
+			bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override{
+				return m_resource->is_equal(other);
+			}
+
+			std::string m_name;
+			std::pmr::memory_resource* m_resource;
+		};
+	*/
 }

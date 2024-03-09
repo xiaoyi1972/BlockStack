@@ -26,7 +26,13 @@
 #include <string>
 #include <sstream>
 #include <chrono>
-
+#include <d2d1.h>
+#include <dwrite.h>
+#include <d3d11.h>
+#include <dxgi.h>
+#include <dcomp.h>
+#include <shellscalingapi.h>
+#include <windef.h>
 
 template<class Interface>
 inline void SafeRelease(Interface** ppInterfaceToRelease)
