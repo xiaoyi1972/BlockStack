@@ -226,7 +226,7 @@ protected:
 	gameData gd;
 	std::variant<Modes::versus, Modes::dig, Modes::sprint> gm;
 	TetrisMapEx map{ 10, 40 };
-	TetrisNode tn{ TetrisNode::spawn(rS.getOne(),&map,dySpawn) };
+	TetrisNode tn{ TetrisNode::spawn(rS.getOne(), &map,dySpawn) };
 	Recorder record{ rS.seed }, recordPath{ rS.seed };
 	std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
 

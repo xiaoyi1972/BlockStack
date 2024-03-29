@@ -168,7 +168,7 @@ namespace chrome {
 
 	void Engine::Logic_with(double elapsedTime, MyTetris& tetris)
 	{
-		if (tetris.hK.restartPressed == 1) {
+		if (tetris.hK.restartPressed == 1 && tetris.hK.complete_calc) {
 			tetris.restart();
 			tetris.hK.restartPressed = 0;
 		}
@@ -178,8 +178,13 @@ namespace chrome {
 		if (turn && turn_index != tetris.index)
 			return;
 
-		if (tetris.hK.gameOver) // Do nothing if game over
+		if (tetris.hK.gameOver) { // Do nothing if game over
+#define With(active) active->hK.restartPressed = 1;
+			for (auto& player : players)
+				With((&player));
+#undef With
 			return;
+		}
 
 		if (tetris.hK.complete_calc) {
 			tetris.hK.botOperSource = tetris.playStep();
@@ -272,11 +277,12 @@ namespace chrome {
 		}
 		if (tetris.hK.botPressed == 1) {
 			constexpr int time = 100;
-			tetris.hK.botcall_handle = std::async(std::launch::async,
-				[&](auto time) {
-					tetris.callBot(time);
-					tetris.hK.complete_calc = true;
-				}, time);
+			auto call_bot = [&](auto time) {
+				tetris.callBot(time);
+				tetris.hK.complete_calc = true;
+				};
+			tetris.hK.botcall_handle = std::async(std::launch::async, call_bot, time);
+			//call_bot(time);
 			tetris.hK.botPressed = 0;
 		}
 	}
@@ -358,7 +364,7 @@ namespace chrome {
 
 			_renderer->push_transform(view_offset);
 
-			for (auto& point : tn.getPoints()) {
+			for (auto& point : tn.data().points) {
 				m_pBrush->SetColor(getColors(tn.type));
 				const auto y = (h - 1) - tn.y - point.y + offsetY;
 				D2D1_RECT_F cur_cell = D2D1::RectF(
@@ -384,7 +390,7 @@ namespace chrome {
 			_renderer->push_transform(view_offset);
 
 			for (const auto type : rS.displayBag) {
-				auto points = TetrisNode::rotateDatas[static_cast<int>(type)][0];
+				auto points = TetrisNode::rotateDatas[static_cast<int>(type)][0].points;
 				auto height = points.back().y - points.front().y;
 
 				_renderer->push_transform(D2D1::Matrix3x2F::Translation(map.width * gridSize + troughWidth,
@@ -416,7 +422,7 @@ namespace chrome {
 				_renderer->push_transform(view_offset);
 
 				auto count = 0, offset = 0;
-				auto points = TetrisNode::rotateDatas[static_cast<int>(hS.type)][0];
+				auto points = TetrisNode::rotateDatas[static_cast<int>(hS.type)][0].points;
 				auto height = points.back().y - points.front().y;
 
 				_renderer->push_transform(D2D1::Matrix3x2F::Translation(

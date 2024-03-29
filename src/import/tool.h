@@ -42,10 +42,10 @@ namespace {
 		using type = T;
 
 		inline static struct {
-			template<class T>
-			auto operator()(T&& arg) -> std::conditional_t<std::is_const_v<std::remove_reference_t<T>>, const type&, type&> {
-				if constexpr (std::is_pointer_v<std::decay_t<T>>)
-					return *const_cast<no_const_pointer_t<std::decay_t<T>>>(arg);
+			template<class U>
+			auto operator()(U&& arg) -> std::conditional_t<std::is_const_v<std::remove_reference_t<U>>, const type&, type&> {
+				if constexpr (std::is_pointer_v<std::decay_t<U>>)
+					return *const_cast<no_const_pointer_t<std::decay_t<U>>>(arg);
 				else
 					return arg;
 			};
@@ -97,6 +97,8 @@ namespace std {
 	};
 }
 
+
+#ifdef USE_SCOPE_WITH_vector_stream_buffer 
 namespace {
 #define self * this
 	using namespace std;
@@ -159,7 +161,35 @@ namespace {
 
 #undef self
 }
+#endif
 
+namespace {
+	template <auto ... Is> 
+	struct List {};
+
+	template<auto Cmp, class List_t>
+	struct extremum;
+
+	template<auto Cmp, auto I0>
+	struct extremum<Cmp, List<I0>> {
+		template<bool reverse>
+		static constexpr auto select = reverse ^ Cmp(I0, I0) ? I0 : I0;
+		static constexpr auto value = std::pair{ select<false>, select<true> };
+	};
+
+	template<auto Cmp, auto I0, auto ...Is>
+	struct extremum<Cmp, List<I0, Is...>> {
+		using rest = extremum<Cmp, List<Is...>>;
+		template<bool reverse>
+		static constexpr auto select = reverse ^ Cmp(I0, rest::template select<reverse>) ? I0 : rest::template select<reverse>;
+		static constexpr auto value = std::pair{ select<false>, select<true> };
+	};
+
+	template<auto Cmp, auto...Val>
+	static constexpr auto extremum_v = extremum<Cmp, List<Val...>>::value;
+}
+
+#ifdef USE_SCOPE_WITH_mergesort
 namespace mergesort{
 	template <auto ... Is> struct array {};
 
@@ -181,9 +211,7 @@ namespace mergesort{
 	template <typename ArrayT, int INDEX>
 	constexpr inline auto get_v = get<ArrayT, INDEX>::value;
 
-	/*
-	 * prepend
-	 */
+	// prepend
 	template <auto I0, typename ArrayT>
 	struct prepend;
 
@@ -196,9 +224,7 @@ namespace mergesort{
 	template <auto I0, typename ArrayT>
 	using prepend_t = typename prepend<I0, ArrayT>::type;
 
-	/*
-	 * take
-	 */
+	// take
 	template <typename ArrayT, int N>
 	struct take;
 
@@ -217,9 +243,7 @@ namespace mergesort{
 	template <typename ArrayT, int N>
 	using take_t = typename take<ArrayT, N>::type;
 
-	/*
-	 * drop
-	 */
+	// drop
 	template <typename ArrayT, int N>
 	struct drop;
 
@@ -238,9 +262,7 @@ namespace mergesort{
 	template <typename ArrayT, int N>
 	using drop_t = typename drop<ArrayT, N>::type;
 
-	/*
-	 * merge
-	 */
+	// merge
 	template <typename Array1, typename Array2>
 	struct merge;
 
@@ -310,6 +332,7 @@ namespace mergesort{
 	template <typename ArrayT>
 	using sort_t = typename sort<ArrayT>::type;
 }
+#endif
 
 namespace {
 	template <class T>
@@ -335,13 +358,13 @@ namespace {
 		template<class R, class...Ts>
 		struct functor_from_tuple<R, std::tuple<Ts...>> : functor_from_tuple <R, Ts...> {};
 
-		template<class T>
+		template<class F>
 		struct class_member_type;
 
-		template<class T, class U>
-		struct class_member_type<U T::*> {
-			using object_t = T;
-			using object_pointer_t = T*;
+		template<class F, class U>
+		struct class_member_type<U F::*> {
+			using object_t = F;
+			using object_pointer_t = F*;
 			using member_t = U;
 		};
 
@@ -367,7 +390,7 @@ namespace {
 		new (&obj) T(std::forward<Ts>(args)...);
 	}
 
-#ifdef USE_SCOPE(restore_with_noassign)
+#ifdef USE_SCOPE_WITH_restore_with_noassign
 	template<class T>
 	struct restore_with_noassign {
 		restore_with_noassign(T& obj) :
@@ -578,7 +601,7 @@ class trivail_vector {
 		}
 
 public:
-	static const auto type_size = sizeof T;
+	static const auto type_size = sizeof (T);
 
 	class Iterator
 	{
@@ -785,111 +808,124 @@ namespace bitwise {
 #include <iostream>
 #include <optional>
 
-template <class T>
-class LockFreeList
+template<typename T>
+class lock_free_stack
 {
-public:
-	LockFreeList() :head(nullptr), m_size(0) {};
-	~LockFreeList() {
-		clear();
-	}
-
-	struct LockFreeSortedListItem
+private:
+	struct node
 	{
-		T value;
-		//std::atomic<LockFreeSortedListItem*> next;
-		LockFreeSortedListItem* next;
-		LockFreeSortedListItem(const T& mvalue) : value(mvalue), next(nullptr) {}
+		node(T const& data_) :
+			data(data_), next(nullptr)
+		{}
+
+		T data;
+		node* next;
 	};
 
-	unsigned int size() {
+	std::atomic<unsigned> threads_in_pop; 
+	std::atomic<node*> to_be_deleted;
+
+	static void delete_nodes(node* nodes)
+	{
+		while (nodes)
+		{
+			node* next = nodes->next;
+			delete nodes;
+			nodes = next;
+		}
+	}
+
+	void chain_pending_nodes(node* nodes)
+	{
+		node* last = nodes;
+		while (node* const next = last->next)  
+		{
+			last = next;
+		}
+		chain_pending_nodes(nodes, last);
+	}
+
+	void chain_pending_nodes(node* first, node* last)
+	{
+		last->next = to_be_deleted;
+		while (!to_be_deleted.compare_exchange_weak(
+			last->next, first));
+	}
+
+	void chain_pending_node(node* n)
+	{
+		chain_pending_nodes(n, n);
+	}
+
+	void try_reclaim(node* old_head)
+	{
+		if (threads_in_pop == 1)
+		{
+			node* nodes_to_delete = to_be_deleted.exchange(nullptr);
+			if (!--threads_in_pop)
+			{
+				delete_nodes(nodes_to_delete);
+			}
+			else if (nodes_to_delete)
+			{
+				chain_pending_nodes(nodes_to_delete);
+			}
+			delete old_head;
+		}
+		else
+		{
+			chain_pending_node(old_head);
+			--threads_in_pop;
+		}
+	}
+
+	std::atomic<node*> head;
+	std::atomic<std::size_t> m_size;
+
+public:
+
+	lock_free_stack() :head(nullptr), m_size(0) {};
+	~lock_free_stack() {
+		while (head)
+			pop();
+	}
+
+	std::size_t size() {
 		return m_size.load();
 	}
 
-	void clear() {
-		LockFreeSortedListItem* p = head.load(), * n = nullptr;
-		head = nullptr;
-		while (p)
-		{
-			n = p->next;
-			p->next = nullptr;
-			delete p;
-			p = n;
-			if (!p)
-			{
-				p = head.load();
-				head = nullptr;
-			}
-		}
-		m_size.store(0);
+	bool empty() {
+		return head == nullptr;
 	}
 
-	bool push(const T& value)
+	void push(T const& data)
 	{
-		LockFreeSortedListItem* p = head.load();
-		bool success = false;
-		if (!p)
-		{
-			head.store(new LockFreeSortedListItem(value));
-			m_size.fetch_add(1);
-			return true;
-		}
-		else {
-			LockFreeSortedListItem* newItem = new LockFreeSortedListItem(value);
-			auto n = head.load(std::memory_order_acquire);
-			newItem->next = n;
-			while (!head.compare_exchange_weak(n, newItem, std::memory_order_release, std::memory_order_relaxed));
-			m_size.fetch_add(1);
-			return true;
-		}
-		return false;
+		node* const new_node = new node(data);
+		new_node->next = head.load();
+		while (!head.compare_exchange_weak(new_node->next, new_node));
+		m_size.fetch_add(1);
 	}
 
 	std::optional<T> pop()
 	{
-		LockFreeSortedListItem* p = head.load(std::memory_order_acquire);
-		while (p && !head.compare_exchange_weak(p, p->next/*.load(std::memory_order_acquire)*/,
-			std::memory_order_release, std::memory_order_relaxed));
-		if (!p)
-			return std::nullopt;
-		m_size.fetch_sub(1);
-		auto g = std::make_optional<T>(p->value);
-		delete p;
-		return g;
+		++threads_in_pop;
+		node* old_head = head.load();
+		while (old_head &&
+			!head.compare_exchange_weak(old_head, old_head->next));
+		std::optional<T> res(std::nullopt);
+		if (old_head)
+		{
+			m_size.fetch_sub(1);
+			res = old_head->data;
+			try_reclaim(old_head);
+		}
+		return res;
 	}
 
-	LockFreeSortedListItem* headPtr() { return head; }
-
-private:
-	std::atomic<LockFreeSortedListItem*> head;
-	std::atomic<unsigned int> m_size;
+	void swap(lock_free_stack& other) {
+		threads_in_pop = other.threads_in_pop.exchange(threads_in_pop);
+		to_be_deleted = other.to_be_deleted.exchange(to_be_deleted);
+		head = other.head.exchange(head);
+		m_size = other.m_size.exchange(m_size);
+	}
 };
-
-namespace {
-	/*
-		struct VerboseMemResource : public std::pmr::memory_resource {
-
-			VerboseMemResource(const char* name, std::pmr::memory_resource* base) :
-				m_name(name), m_resource(base) {}
-		private:
-
-			void* do_allocate(std::size_t bytes, std::size_t alignment) override {
-				auto ptr = m_resource->allocate(bytes, alignment);
-				std::cout << "Allocating " << bytes << " bytes with '" << m_name << "':" << ptr << "\n";
-				return ptr;
-			}
-
-			void do_deallocate(void* ptr, std::size_t bytes, std::size_t alignment) override {
-				std::cout << "Deallocating " << bytes << " bytes with '" << m_name << "':" << ptr << "\n";
-				return m_resource->deallocate(ptr, bytes, alignment);
-			}
-
-			bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override{
-				return m_resource->is_equal(other);
-			}
-
-			std::string m_name;
-			std::pmr::memory_resource* m_resource;
-		};
-	*/
-}

@@ -1,5 +1,4 @@
-﻿
-#define _CRT_SECURE_NO_WARNINGS
+﻿#define _CRT_SECURE_NO_WARNINGS
 #include <ctime>
 #include <mutex>
 #include <fstream>
@@ -19,14 +18,6 @@
 #include "tetrisCore.h"
 #include "timer.hpp"
 #include "sb_tree.h"
-
-#if _MSC_VER
-#define NOMINMAX
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
-
 
 template <class... Args>
 std::string string_format(const std::string& format, Args... args) {
@@ -83,13 +74,9 @@ namespace zzz
 	}
 }
 
-std::string data;
+std::string str_data;
 
-struct EvalArgs {
-	using Evaluator = Evaluator<TreeContext<TreeNode>>;
-	Evaluator::BoardWeights board_weights = Evaluator::BoardWeights::default_args();
-	Evaluator::PlacementWeights placement_weights = Evaluator::PlacementWeights::default_args();;
-};
+using EvalArgs = TetrisDelegator::EvalArgs;
 
 struct pso_dimension
 {
@@ -170,6 +157,7 @@ public:
 	void init(pso_data const& data, pso_config const& config, size_t round_ms) {
 		restart();
 		evalArgs = data.param;
+		bot.set_board_weights(evalArgs);
 	}
 
 	const TetrisNode& cur() {
@@ -177,69 +165,75 @@ public:
 	}
 
 	void callBot(const int limitTime) {
-		ctx.reset(new TreeContext<TreeNode>);
-		caculateBot(tn, limitTime);
+		caculateBot(tn, map, limitTime);
+		auto action = getStep();
+		playPath(action);
 	}
+
+	void caculateBot(const TetrisNode& start, const TetrisMap& field, const int limitTime) {
+		auto dp = std::vector(rS.displayBag.begin(), rS.displayBag.begin() + 6);
+		state = TetrisDelegator::GameState{
+			.dySpawn = dySpawn,
+			.upAtt = std::holds_alternative<Modes::versus>(gm) ? std::get<Modes::versus>(gm).trashLinesCount : 0,
+			.bag = dp,
+			.cur = start,
+			.field = &field,
+			.canHold = hS.able,
+			.hold = hS.type,
+			.b2b = !!gd.b2b,
+			.combo = gd.combo,
+			.path_sd = false
+		};
+		bot.run(state, limitTime);
+	}
+
+	void caculateBot(const int limitTime) {
+		caculateBot(tn, map, limitTime);
+	}
+
+	std::optional<std::vector<Oper>> getStep() {
+		TetrisDelegator::OutInfo tag{};
+		state.upAtt = std::holds_alternative<Modes::versus>(gm) ? std::get<Modes::versus>(gm).trashLinesCount : 0;
+		auto path = bot.suggest(state, tag);
+		if (!path) {
+			path = std::vector<Oper>{ Oper::HardDrop };
+		}
+		//pull information
+		nodeCounts = tag.nodeCounts;
+		info = tag.info;
+		migrate = tag.migrate;
+		landpoint = tag.landpoint;
+		pathCost = tag.pathCost;
+		return *path;
+	}
+
 
 	void playStep() {
-		const TetrisNode& start = tn;
-		auto upAtt = std::holds_alternative<Modes::versus>(gm) ? std::get<Modes::versus>(gm).trashLinesCount : 0;
-		auto [best, ishold] = ctx->getBest(upAtt);
-		std::vector<Oper>path;
-		Timer t;
-		if (best == nullptr)
-			goto end;
-		if (!ishold) {
-			fromN = start, toN = *best;
-			t.reset();
-			path = Search::make_path(start, *best, map, false);
-			pathCost = t.elapsed<Timer::us>();
+		playPath(getStep());
+	}
+
+	void playPath(const std::optional<std::vector<Oper>>& path) {
+		if (path) {
+			pathStr = std::to_string(*path);
+			for (auto& i : *path) {
+				opers(i);
+			}
 		}
 		else {
-			auto holdNode = TetrisNode::spawn(hS.type ? *hS.type : rS.displayBag[0], &map, dySpawn);
-			fromN = holdNode, toN = *best;
-			t.reset();
-			path = Search::make_path(holdNode, *best, map, false);
-			pathCost = t.elapsed<Timer::us>();
-			path.insert(path.begin(), Oper::Hold);
-		}
-	end:
-		if (path.empty())
-			path.push_back(Oper::HardDrop);
-		pathStr = std::to_string(path);
-		nodeCounts = ctx->count;
-		info = ctx->info;
-		playPath(path);
-	}
-
-	void caculateBot(const TetrisNode& start, const int limitTime) {
-		auto dp = std::vector(rS.displayBag.begin(), rS.displayBag.begin() + 6);
-		ctx->evalutator.board_weights = evalArgs.board_weights;
-		ctx->evalutator.placement_weights = evalArgs.placement_weights;
-		auto init_context = [&](auto&& context) {
-			context->createRoot(start, map, dp, hS.type, hS.able, !!gd.b2b, gd.combo, dySpawn);
-		};
-		init_context(ctx);
-		auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limitTime);
-		auto taskrun = [&](auto&& context) {
-			do {
-				context->run();
-			} while (std::chrono::steady_clock::now() < end);
-		};
-		taskrun(ctx);
-	}
-
-	void playPath(const std::vector<Oper>& path) {
-		for (auto& i : path) {
-			opers(i);
+			opers(Oper::HardDrop);
 		}
 	}
 
 	std::string pathStr, info;
 	int nodeCounts{}, pathCost{};
-	TetrisNode fromN, toN;
+	std::optional<TetrisNode> migrate, landpoint;
+	TetrisDelegator::GameState state{};
+	TetrisDelegator bot = TetrisDelegator::launch({
+		.use_static = true,
+		.delete_byself = true,
+		.thread_num = 1u
+		});
 	EvalArgs evalArgs;
-	std::unique_ptr<TreeContext<TreeNode>> ctx;
 };
 
 static void match(test_ai& ai1, test_ai& ai2, std::function<void(test_ai const&, test_ai const&)> out_put, size_t match_round)
@@ -395,8 +389,8 @@ auto piece_to_char = [](Piece type) {
 };
 
 auto get_hold = [](auto && ai) -> char{
-	if (ai.hS.type) {
-		return piece_to_char(*ai.hS.type);
+	if (ai.hS.type != Piece::None) {
+		return piece_to_char(ai.hS.type);
 	}
 	else 
 		return ' ';
@@ -406,6 +400,7 @@ auto get_next = [](auto && ai, std::size_t i) -> char {
 	return piece_to_char(ai.rS.displayBag[i]);
 };
 
+#ifndef USE_NORMAL
 #include <memory>  // for allocator, __shared_ptr_access
 #include <string>  // for char_traits, operator+, string, basic_string
 
@@ -417,7 +412,7 @@ ftxui::ScreenInteractive* screen_ptr;
 
 int main(int argc, char const* argv[])
 {
-	std::atomic<uint32_t> count{std::max<uint32_t>(1, std::thread::hardware_concurrency() - 1)};
+	std::atomic<uint32_t> count = {std::max<uint32_t>(1, std::thread::hardware_concurrency() - 1)};
 	std::string file = "data.bin";
 	if (argc > 1)
 	{
@@ -472,21 +467,22 @@ int main(int argc, char const* argv[])
 	std::mt19937 mt;
 
 	{
-		EvalArgs p;
+		EvalArgs p = EvalArgs::default_args();
 
-		v(p.board_weights.height, 100, 2);
+		v(p.board_weights.height[0], 100, 2);
+		v(p.board_weights.height[1], 100, 2);
+		v(p.board_weights.height[2], 100, 2);
 		v(p.board_weights.holes, 100, 2);
+		v(p.board_weights.hole_lines, 300, 2);
 		v(p.board_weights.cells_coveredness, 100, 2);
 		v(p.board_weights.row_transition, 100, 2);
 		v(p.board_weights.col_transition, 100, 2);
-		v(p.board_weights.well_depth, 100, 2);
-		v(p.board_weights.jeopardy, 100, 2);
-		v(p.board_weights.tslot[0], 100, 2);
-		v(p.board_weights.tslot[1], 100, 2);
-		v(p.board_weights.tslot[2], 100, 2);
-		v(p.board_weights.tslot[3], 100, 2);
-
-		v(p.placement_weights.back_to_back, 100, 2);
+		v(p.board_weights.well_depth, 200, 2);
+		v(p.board_weights.hole_depth, 200, 2);
+		v(p.board_weights.tslot[0], 500, 2);
+		v(p.board_weights.tslot[1], 500, 2);
+		v(p.board_weights.tslot[2], 500, 2);
+		v(p.board_weights.tslot[3], 500, 2);
 		v(p.placement_weights.b2b_clear, 100, 2);
 		v(p.placement_weights.clear1, 100, 2);
 		v(p.placement_weights.clear2, 100, 2);
@@ -498,7 +494,9 @@ int main(int argc, char const* argv[])
 		v(p.placement_weights.mini_tspin, 100, 2);
 		v(p.placement_weights.perfect_clear, 100, 2);
 		v(p.placement_weights.combo_garbage, 100, 2);
+		v(p.placement_weights.back_to_back, 100, 2);
 		v(p.placement_weights.wasted_t, 100, 2);
+		v(p.placement_weights.jeopardy, 100, 2);
 		v(p.placement_weights.soft_drop, 50, 2, -50);
 
 		if (rank_table.empty())
@@ -601,7 +599,7 @@ int main(int argc, char const* argv[])
 							out += '\n';
 						}
 
-						data = std::move(out);
+						str_data = std::move(out);
 						screen_ptr->Post(ftxui::Event::Custom);
 					};
 
@@ -731,37 +729,41 @@ int main(int argc, char const* argv[])
 	auto print_config = [&rank_table, &rank_table_lock](Node* node)
 	{
 		rank_table_lock.lock();
-		data = string_format(
-			"[99]name         = %s\n"
-			"[  ]rank         = %d\n"
-			"[  ]score        = %f\n"
-			"[  ]best         = %f\n"
-			"[  ]match        = %d\n"
-			"[ 0]height         = %8.3f, %8.3f, %8.3f\n"
-			"[ 1]holes         = %8.3f, %8.3f, %8.3f\n"
-			"[ 2]cells_coveredness    = %8.3f, %8.3f, %8.3f\n"
-			"[ 3]row_transition    = %8.3f, %8.3f, %8.3f\n"
-			"[ 4]col_transition   = %8.3f, %8.3f, %8.3f\n"
-			"[ 5]well_depth    = %8.3f, %8.3f, %8.3f\n"
-			"[ 6]jeopardy  = %8.3f, %8.3f, %8.3f\n"
-			"[ 7]tslot_0       = %8.3f, %8.3f, %8.3f\n"
-			"[ 8]tslot_1       = %8.3f, %8.3f, %8.3f\n"
-			"[ 9]tslot_2       = %8.3f, %8.3f, %8.3f\n"
-			"[10]tslot_3         = %8.3f, %8.3f, %8.3f\n"
-			"[11]back_to_back         = %8.3f, %8.3f, %8.3f\n"
-			"[12]b2b_clear       = %8.3f, %8.3f, %8.3f\n"
-			"[13]clear1       = %8.3f, %8.3f, %8.3f\n"
-			"[14]clear2       = %8.3f, %8.3f, %8.3f\n"
-			"[15]clear3      = %8.3f, %8.3f, %8.3f\n"
-			"[16]clear4      = %8.3f, %8.3f, %8.3f\n"
-			"[17]tspin1      = %8.3f, %8.3f, %8.3f\n"
-			"[18]tspin2      = %8.3f, %8.3f, %8.3f\n"
-			"[19]tspin3      = %8.3f, %8.3f, %8.3f\n"
-			"[20]mini_tspin      = %8.3f, %8.3f, %8.3f\n"
-			"[21]perfect_clear      = %8.3f, %8.3f, %8.3f\n"
-			"[22]combo_garbage      = %8.3f, %8.3f, %8.3f\n"
-			"[23]wasted_t      = %8.3f, %8.3f, %8.3f\n"
-			"[24]soft_drop   = %8.3f, %8.3f, %8.3f\n"
+		auto str = string_format(
+			"[99]name                 = %s\n"
+			"[  ]rank                 = %d\n"
+			"[  ]score                = %f\n"
+			"[  ]best                 = %f\n"
+			"[  ]match                = %d\n"
+			"[ 0]height[0]            = %8.3f, %8.3f, %8.3f\n"
+			"[ 1]height[1]            = %8.3f, %8.3f, %8.3f\n"
+			"[ 2]height[2]            = %8.3f, %8.3f, %8.3f\n"
+			"[ 3]holes                = %8.3f, %8.3f, %8.3f\n"
+			"[ 4]hole_lines           = %8.3f, %8.3f, %8.3f\n"
+			"[ 5]cells_coveredness    = %8.3f, %8.3f, %8.3f\n"
+			"[ 6]row_transition       = %8.3f, %8.3f, %8.3f\n"
+			"[ 7]col_transition       = %8.3f, %8.3f, %8.3f\n"
+			"[ 8]well_depth           = %8.3f, %8.3f, %8.3f\n"
+			"[ 9]hole_depth           = %8.3f, %8.3f, %8.3f\n"
+			"[10]tslot[0]             = %8.3f, %8.3f, %8.3f\n"
+			"[11]tslot[1]             = %8.3f, %8.3f, %8.3f\n"
+			"[12]tslot[2]             = %8.3f, %8.3f, %8.3f\n"
+			"[13]tslot[3]             = %8.3f, %8.3f, %8.3f\n"
+			"[14]b2b_clear            = %8.3f, %8.3f, %8.3f\n"
+			"[15]clear1               = %8.3f, %8.3f, %8.3f\n"
+			"[16]clear2               = %8.3f, %8.3f, %8.3f\n"
+			"[17]clear3               = %8.3f, %8.3f, %8.3f\n"
+			"[18]clear4               = %8.3f, %8.3f, %8.3f\n"
+			"[19]tspin1               = %8.3f, %8.3f, %8.3f\n"
+			"[20]tspin2               = %8.3f, %8.3f, %8.3f\n"
+			"[21]tspin3               = %8.3f, %8.3f, %8.3f\n"
+			"[22]mini_tspin           = %8.3f, %8.3f, %8.3f\n"
+			"[23]perfect_clear        = %8.3f, %8.3f, %8.3f\n"
+			"[24]combo_garbage        = %8.3f, %8.3f, %8.3f\n"
+			"[25]back_to_back         = %8.3f, %8.3f, %8.3f\n"
+			"[26]wasted_t             = %8.3f, %8.3f, %8.3f\n"
+			"[27]jeopardy             = %8.3f, %8.3f, %8.3f\n"
+			"[28]soft_drop            = %8.3f, %8.3f, %8.3f\n"
 			, node->data.name
 			, rank_table.rank(double(node->data.score))
 			, node->data.score
@@ -792,8 +794,13 @@ int main(int argc, char const* argv[])
 			, node->data.data.x[22], node->data.data.p[22], node->data.data.v[22]
 			, node->data.data.x[23], node->data.data.p[23], node->data.data.v[23]
 			, node->data.data.x[24], node->data.data.p[24], node->data.data.v[24]
+			, node->data.data.x[25], node->data.data.p[25], node->data.data.v[25]
+			, node->data.data.x[26], node->data.data.p[26], node->data.data.v[26]
+			, node->data.data.x[27], node->data.data.p[27], node->data.data.v[27]
+			, node->data.data.x[28], node->data.data.p[28], node->data.data.v[28]
 		);
 		rank_table_lock.unlock();
+		std::cout << str << "\n";
 	};
 
 	std::map<std::string, std::function<bool(std::vector<std::string> const&)>> command_map;
@@ -876,12 +883,13 @@ int main(int argc, char const* argv[])
 				begin = std::atoi(token[1].c_str()) - 1;
 				end = begin + std::atoi(token[2].c_str());
 			}
-			data = "";
+			std::string str = "";
 			for (size_t i = begin; i < end && i < rank_table.size(); ++i)
 			{
 				auto node = rank_table.at(i);
-				data += string_format("rank = %3d elo = %4.1f best = %4.1f match = %3zd gen = %5zd name = %s\n", i + 1, node->data.score, node->data.best, node->data.match, node->data.gen, node->data.name);
+				str += string_format("rank = %3d elo = %4.1f best = %4.1f match = %3zd gen = %5zd name = %s\n", i + 1, node->data.score, node->data.best, node->data.match, node->data.gen, node->data.name);
 			}
+			std::cout << str << "\n";
 			rank_table_lock.unlock();
 			return true;
 		}));
@@ -915,21 +923,24 @@ int main(int argc, char const* argv[])
 			{
 				node = &rank_table.front()->data.data;
 			}
+			std::string str;
 			if (token[1] == "bat")
 			{
-				data = string_format(
-					"SET height=%.9f\n"
+				str = string_format(
+					"SET height[0]=%.9f\n"
+					"SET height[1]=%.9f\n"
+					"SET height[2]=%.9f\n"
 					"SET holes=%.9f\n"
+					"SET hole_lines=%.9f\n"
 					"SET cells_coveredness=%.9f\n"
 					"SET row_transition=%.9f\n"
 					"SET col_transition=%.9f\n"
 					"SET well_depth=%.9f\n"
-					"SET jeopardy=%.9f\n"
-					"SET tslot_0=%.9f\n"
-					"SET tslot_1=%.9f\n"
-					"SET tslot_2=%.9f\n"
-					"SET tslot_3=%.9f\n"
-					"SET back_to_back=%.9f\n"
+					"SET hole_depth=%.9f\n"
+					"SET tslot[0]=%.9f\n"
+					"SET tslot[1]=%.9f\n"
+					"SET tslot[2]=%.9f\n"
+					"SET tslot[3]=%.9f\n"
 					"SET b2b_clear=%.9f\n"
 					"SET clear1=%.9f\n"
 					"SET clear2=%.9f\n"
@@ -941,7 +952,9 @@ int main(int argc, char const* argv[])
 					"SET mini_tspin=%.9f\n"
 					"SET perfect_clear=%.9f\n"
 					"SET combo_garbage=%.9f\n"
+					"SET back_to_back=%.9f\n"
 					"SET wasted_t=%.9f\n"
+					"SET jeopardy=%.9f\n"
 					"SET soft_drop=%.9f\n"
 					, node->p[0]
 					, node->p[1]
@@ -968,14 +981,18 @@ int main(int argc, char const* argv[])
 					, node->p[22]
 					, node->p[23]
 					, node->p[24]
+					, node->p[25]
+					, node->p[26]
+					, node->p[27]
+					, node->p[28]
 				);
 			}
 			else if (token[1] == "cpp")
 			{
-				data = string_format(
+				str = string_format(
 					"{%.9f, %.9f, %.9f, %.9f, %.9f, %.9f, %.9f, %.9f, %.9f, %.9f,"
 					" %.9f, %.9f, %.9f, %.9f, %.9f, %.9f, %.9f, %.9f, %.9f, %.9f,"
-					" %.9f, %.9f, %.9f, %.9f, %.9f}\n"
+					" %.9f, %.9f, %.9f, %.9f, %.9f, %.9f, %.9f, %.9f, %.9f}\n"
 					, node->p[0]
 					, node->p[1]
 					, node->p[2]
@@ -1001,8 +1018,13 @@ int main(int argc, char const* argv[])
 					, node->p[22]
 					, node->p[23]
 					, node->p[24]
+					, node->p[25]
+					, node->p[26]
+					, node->p[27]
+					, node->p[28]
 				);
 			}
+			std::cout << str << "\n";
 			rank_table_lock.unlock();
 			return true;
 		}));
@@ -1016,7 +1038,7 @@ int main(int argc, char const* argv[])
 			}
 			ofs.flush();
 			ofs.close();
-			data = string_format("%d node(s) saved\n", rank_table.size());
+			std::cout << string_format("%d node(s) saved\n", rank_table.size()) << "\n";
 			rank_table_lock.unlock();
 			return true;
 		}));
@@ -1036,7 +1058,7 @@ int main(int argc, char const* argv[])
 		}));
 	command_map.insert(std::make_pair("help", [](std::vector<std::string> const& token)
 		{
-			data = string_format(
+			std::cout << string_format(
 				"help                 - ...\n"
 				"view                 - view a match (press enter to stop)\n"
 				"rank                 - show all nodes\n"
@@ -1048,19 +1070,20 @@ int main(int argc, char const* argv[])
 				"copy [name]          - copy a new node which last selected\n"
 				"save                 - ...\n"
 				"exit                 - save & exit\n"
-			);
+			) << "\n";
 			return true;
 		}));
-	std::string line, last;
 
-	auto main_loop = [&](std::string& line) {
+	std::string line, last;
+	view = true;
+
+	auto main_loop = [&](std::string& line, auto&& interrupt) {
 		std::vector<std::string> token;
 		zzz::split(token, line, " ");
 		if (view)
 		{
 			view = false;
 			view_index = 0;
-			//return;
 		}
 		if (token.empty())
 		{
@@ -1069,6 +1092,10 @@ int main(int argc, char const* argv[])
 		}
 		if (token.empty())
 		{
+			return;
+		}
+		if (token.front() != "view") {
+			interrupt();
 			return;
 		}
 		auto find = command_map.find(token.front());
@@ -1088,19 +1115,52 @@ int main(int argc, char const* argv[])
 	std::string command, input_entries;
 	auto input_option = ftxui::InputOption();
 	std::string input_add_content;
+
+	auto interrupt = screen.WithRestoredIO([&] {
+		std::string line = input_entries;
+		while (true) {
+			std::vector<std::string> token;
+			zzz::split(token, line, " ");
+			if (token.empty())
+			{
+				line = last;
+				zzz::split(token, line, " ");
+			}
+			if (token.empty())
+			{
+				return;
+			}
+			auto find = command_map.find(token.front());
+			if (find == command_map.end())
+			{
+				return;
+			}
+			if (find->second(token))
+			{
+				last = line;
+			}
+			if (token.front() == "view") {
+				return;
+			}
+			std::getline(std::cin, line);
+			std::cout << "\n";
+		}
+	});
+
 	input_option.on_enter = [&] {
 		input_entries = command;
 		if (input_entries.back() == '\n') {
 			input_entries.pop_back();
 		}
 		//data += input_entries;
-		main_loop(input_entries);
+		main_loop(input_entries, interrupt);
 		command = "";
 	};
+
 	auto input_command = ftxui::Input(&command, "command", input_option);
 
 	auto main_render = ftxui::Renderer([&]() {
-		auto& s = data;
+		auto& s = str_data;
 		ftxui::Elements lines;
 		std::size_t start = 0U, end;
 		while ((end = s.find('\n', start)) != std::string::npos) {
@@ -1109,7 +1169,7 @@ int main(int argc, char const* argv[])
 		}
 		lines.push_back(ftxui::hflow(ftxui::paragraph(s.substr(start))));
 		return ftxui::vbox(std::move(lines));
-		});
+	});
 
 	/*std::thread refresh_ui([&] {
 		while (refresh_ui_continue) {
@@ -1120,14 +1180,16 @@ int main(int argc, char const* argv[])
 		}
 	});*/
 
-	auto component2 = ftxui::Container::Vertical({ input_command, main_render });
+	auto component2 = ftxui::Container::Vertical({ input_command, main_render});
 	auto renderer = ftxui::Renderer(component2, [&] {
 		return ftxui::vbox({
 			main_render->Render() | ftxui::flex,
 			ftxui::separatorCharacter(""),
-			input_command->Render() | ftxui::focus
+			input_command->Render() | ftxui::focus,
 			}) | ftxui::flex;
 		});
+
+
 
 
 	/*ftxui::Loop loop(&screen, renderer);
@@ -1175,3 +1237,67 @@ int main(int argc, char const* argv[])
 		}
 	}*/
 }
+
+#else
+
+// Copyright 2022 Arthur Sonzogni. All rights reserved.
+// Use of this source code is governed by the MIT license that can be found in
+// the LICENSE file.
+#include <cstdlib>   // for system, EXIT_SUCCESS
+#include <iostream>  // for operator<<, basic_ostream, basic_ostream::operator<<, cout, endl, flush, ostream, basic_ostream<>::__ostream_type, cin
+#include <memory>    // for shared_ptr, __shared_ptr_access, allocator
+#include <string>    // for getline, string
+
+#include "ftxui/component/captured_mouse.hpp"  // for ftxui
+#include "ftxui/component/component.hpp"  // for Button, Horizontal, Renderer
+#include "ftxui/component/component_base.hpp"      // for ComponentBase
+#include "ftxui/component/screen_interactive.hpp"  // for ScreenInteractive
+#include "ftxui/dom/elements.hpp"  // for operator|, filler, Element, borderEmpty, hbox, size, paragraph, vbox, LESS_THAN, border, center, HEIGHT, WIDTH
+
+int main() {
+	using namespace ftxui;
+
+	auto screen = ScreenInteractive::Fullscreen();
+
+	// When pressing this button, "screen.WithRestoredIO" will execute the
+	// temporarily uninstall the terminal hook and execute the provided callback
+	// function. This allow running the application in a non-interactive mode.
+	auto btn_run = Button("Execute with restored IO", screen.WithRestoredIO([] {
+		std::cout << "This is a child program using stdin/stdout." << std::endl;
+		for (int i = 0; i < 10; ++i) {
+			std::cout << "Please enter 10 strings (" << i << "/10)" << std::flush;
+			std::string input;
+			std::getline(std::cin, input);
+		}
+		}));
+
+	auto btn_quit = Button("Quit", screen.ExitLoopClosure());
+
+	auto layout = Container::Horizontal({
+		btn_run,
+		btn_quit,
+		});
+
+	auto renderer = Renderer(layout, [&] {
+		auto explanation = paragraph(
+			"After clicking this button, the ScreenInteractive will be "
+			"suspended and access to stdin/stdout will temporarilly be "
+			"restore for running a function.");
+		auto element = vbox({
+			explanation | borderEmpty,
+			hbox({
+				btn_run->Render(),
+				filler(),
+				btn_quit->Render(),
+			}),
+			});
+
+		element = element | borderEmpty | border | size(WIDTH, LESS_THAN, 80) |
+			size(HEIGHT, LESS_THAN, 20) | center;
+		return element;
+		});
+
+	screen.Loop(renderer);
+	return EXIT_SUCCESS;
+}
+#endif

@@ -33,7 +33,7 @@ namespace std {
 	std::ostream& operator<<(std::ostream&, const TSpinType&);
 }
 
-struct  Pos {
+struct Pos {
 	Pos() noexcept = default;
 	constexpr Pos(int _x, int _y) noexcept : x(_x), y(_y) {}
 	bool operator==(const Pos& a) const {
@@ -41,6 +41,16 @@ struct  Pos {
 	}
 	int x, y;
 };
+
+template<class T>
+struct minoDatas {
+	T points;
+	Pos x_range;
+	Pos y_range;
+};
+
+template< class T, class... U >
+minoDatas(T, U...) -> minoDatas<T>;
 
 template<std::size_t...Is>
 struct minoData {
@@ -58,17 +68,31 @@ struct minoData {
 		}
 	}
 
+	template<auto...ts>
+	struct from_minoPoints{
+		static constexpr auto get() {
+			auto rangexs = extremum_v < [](auto p1, auto p2) {return p1.x < p2.x; }, ts... > ;
+			auto rangeys = extremum_v < [](auto p1, auto p2) {return p1.y < p2.y; }, ts... > ;
+			return minoDatas{ 
+				std::array{ ts... },
+				Pos{ rangexs.first.x, rangexs.second.x },
+				Pos{ rangeys.first.y, rangeys.second.y }
+			};
+		}
+	};
+
 	template<std::size_t n>
 	static constexpr auto point() {
-		return with_sequence_impl([&](auto...Ints) { return std::array{ Pos{Ints.value% len, Ints.value / len}... }; },
-			filter_integer_sequence(std::make_index_sequence<len * len>(),
-				[&](auto c) {return matrix_cw<n>(len, matrix)[c]; }
-		));
-	};
+		return with_sequence_impl(
+			[&](auto...Ints) {return from_minoPoints < Pos{ Ints.value % len, Ints.value / len }... > ::get(); },
+			filter_integer_sequence(std::make_index_sequence<len * len>(), [&](auto c) {return matrix_cw<n>(len, matrix)[c]; })
+		);
+	}
 
 	static constexpr auto points = with_sequence<4>([](auto...c) {
 		return std::array{ point<c>()... };
 		});
+
 };
 
 template<class TetrisMap>
@@ -340,7 +364,7 @@ public:
 		:map(_map), node(_node), simple(_simple) {}
 
 	void print(std::ostream& out) const {
-		auto points = *(node.data + node.rs);
+		auto points = node.data(node.rs).points;
 		std::sort(points.begin(), points.end(), [](auto& lhs, auto& rhs) {return lhs.y == rhs.y ? lhs.x < rhs.x : lhs.y > rhs.y; });
 		auto it = points.begin();
 		for (int y = (!simple ? map.height - 1 : map.roof - 1); y >= 0; --y) {//draw field
@@ -364,7 +388,6 @@ class TetrisNode {
 public:
 	Piece type;
 	int x, y, rs;
-	const std::array<Pos, 4U>* data;
 	int step, moves;
 	TSpinType typeTSpin;
 	bool mini : 1;
@@ -373,7 +396,6 @@ public:
 
 	TetrisNode(Piece _type, int _x, int _y, int _rs) noexcept :
 		type(_type), x(_x), y(_y), rs(_rs),
-		data(_type == Piece::None ? nullptr : &rotateDatas[static_cast<int>(_type)][0]),
 		step(0), moves(0),
 		mini(false), spin(false), lastRotate(false), typeTSpin(TSpinType::None) {}
 
@@ -394,6 +416,14 @@ public:
 			enum_type_value(type) > enum_type_value(rhs.type);
 	}
 
+	forceinline auto& data(int _rs) const {
+		return rotateDatas[static_cast<int>(type)][_rs];
+	}
+
+	forceinline auto& data() const {
+		return rotateDatas[static_cast<int>(type)][rs];
+	}
+
 	void shift(int dx, int dy) {
 		x += dx, y += dy;
 	}
@@ -406,7 +436,7 @@ public:
 	}
 
 	bool check(const TetrisMap& map, int x, int  y, int rs) const {
-		const auto& points = data[rs];
+		const auto& points = data(rs).points;
 		for (auto& point : points) {
 			if (map(point.x + x, point.y + y)) 
 				return false;
@@ -419,7 +449,7 @@ public:
 
 	std::tuple<std::vector<Pos>, std::vector<int>> attachs(TetrisMapEx& map, int x, int y, int rs) {
 		std::vector<Pos> change;
-		const auto& points = data[rs];
+		const auto& points = data(rs).points;
 		for (auto& point : points) {
 			auto py = point.y + y, px = point.x + x;
 			map.set<true>(px, py);
@@ -432,13 +462,9 @@ public:
 		return { change, map.clear() };
 	}
 
-	forceinline auto& getPoints() const {
-		return data[rs];
-	}
-
 	template<bool clear = true>
 	std::size_t attach(TetrisMap& map, int x, int y, int rs) {
-		const auto& points = data[rs];
+		const auto& points = data(rs).points;
 		for (auto& point : points) {
 			auto px = point.x + x, py = point.y + y;
 			map.set<true>(px, py);
@@ -453,7 +479,7 @@ public:
 	}
 
 	std::size_t fillRows(TetrisMap& map, int x, int y, int rs) {
-		const auto& points = data[rs];
+		const auto& points = data(rs).points;
 		std::size_t count = 0;
 		int full = (1 << map.width) - 1, row{};
 		std::optional<int> pre;
@@ -470,14 +496,14 @@ public:
 	}
 
 	template<class T>
-	auto& getHoriZontalNodes(const TetrisMap& map, T& out) const{
+	auto& getHoriZontalNodes(const TetrisMap& map, T& out) const {
 		auto node = *this;
 		auto trans = 1 << 2 * (type != Piece::O);
 		out.reserve(trans * map.width);
 		for (auto i = 0; i++ < 4;) {
-			const auto& points = data[node.rs];
-			auto [p0, p1] = std::minmax_element(points.begin(), points.end(), [](auto& p0, auto& p1) {return p0.x < p1.x; });
-			for (int n = -p0->x; n < map.width - p1->x; ++n) {
+			const auto& points = data(node.rs).points;
+			auto& [p0, p1] = data(node.rs).x_range;
+			for (int n = -p0; n < map.width - p1; ++n) {
 				out.emplace_back(type, n, node.y, node.rs);
 			}
 			if (type == Piece::O) 
@@ -492,7 +518,7 @@ public:
 	std::size_t attach(TetrisMap& map) { return attach<clear>(map, x, y, rs); }
 
 	int getDrop(const TetrisMap& map) {
-		const auto& points = data[rs];
+		const auto& points = data(rs).points;
 		auto res = y + points.front().y - map.top[x + points.front().x];
 		for (auto it = points.begin() + 1; it != points.end() && res >= 0; ++it) {
 			res = bitwise::min(res, y + it->y - map.top[x + it->x]);
@@ -516,7 +542,7 @@ public:
 	}
 
 	bool open(const TetrisMap& map) const{
-		const auto& points = data[rs];
+		const auto& points = data(rs).points;
 		for (auto& point : points) {
 			if (point.y + y < map.top[point.x + x]) return false;
 		}
@@ -569,10 +595,11 @@ public:
 		case 3:mini = map(x + 2, y + 1); break;
 		}
 		sum = map(x, y) + map(x, y + 2) + map(x + 2, y) + map(x + 2, y + 2);
-		if constexpr (save)
-			return { this->spin = sum > 2, this->mini = mini };
-		else
-			return{ sum > 2, mini };
+		if constexpr (save){
+			this->spin = sum > 2;
+			this->mini = mini;
+		}
+		return { sum > 2, mini };
 	}
 
 	void getTSpinType() {
@@ -584,7 +611,7 @@ public:
 	}
 
 	int mean_y() const{
-		const auto& points = data[rs];
+		const auto& points = data(rs).points;
 		auto [y0, y1] = std::minmax_element(points.begin(), points.end(), [](auto& p0, auto& p1) {return p0.y < p1.y; });
 		return ((y0->y + y) + (y1->y + y)) / 2;
 	}
@@ -604,7 +631,7 @@ public:
 		minoData<0, 7, 4>::points, // L
 		minoData<0, 7, 1>::points, // J
 		minoData<0, 3, 6>::points, // S
-		minoData<0, 6, 3>::points // Z
+		minoData<0, 6, 3>::points  // Z
 	};
 
 	static constexpr std::array kickDatas{
@@ -690,7 +717,7 @@ public:
 
 	template<bool is = true>
 	void set(const TetrisNode& target, const T& value) {
-		const auto& point_front = target.getPoints()[0];
+		const auto& point_front = target.data().points[0];
 		if constexpr (is) {
 			auto n = index(point_front.x + target.x, point_front.y + target.y, target.rs);
 			elem[n] = value;
@@ -705,7 +732,7 @@ public:
 
 	template<bool is = true>
 	void clear(const TetrisNode& target) {
-		const auto& point_front = target.getPoints()[0];
+		const auto& point_front = target.data().points[0];
 		if constexpr (is) {
 			auto n = index(point_front.x + target.x, point_front.y + target.y, target.rs);
 			exist.set_value<false>(n);
@@ -718,7 +745,7 @@ public:
 
 	template<bool is = true>
 	bool contain(const TetrisNode& target) {
-		const auto& point_front = target.getPoints()[0];
+		const auto& point_front = target.data().points [0] ;
 		if constexpr (is) {
 			auto n = index(point_front.x + target.x, point_front.y + target.y, target.rs);
 			return exist.has_value(n);
@@ -731,7 +758,7 @@ public:
 
 	template<bool is = true>
 	T* get(const TetrisNode& target) {
-		const auto& point_front = target.getPoints()[0];
+		const auto& point_front = target.data().points[0];
 		if constexpr (is) {
 			auto n = index(point_front.x + target.x, point_front.y + target.y, target.rs);
 			return exist.has_value(n) ? std::addressof(elem[n]) : nullptr;

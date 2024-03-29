@@ -18,6 +18,7 @@
 #include<shared_mutex>
 #include<span>
 #include<queue>
+#include<functional>
 
 #ifdef TEST_REQUIRE
 #include<unordered_set>
@@ -459,8 +460,17 @@ struct Evaluator {
 		double tslot[4] = { 120, 240, 480, 960 };
 
 		static auto default_args() {
-			BoardWeights p;
-			memset(&p, 0, sizeof p);
+			BoardWeights p{
+				.height = {-50, -50, -50},
+				.holes = -50,
+				.hole_lines = -50,
+				.cells_coveredness = -50,
+				.row_transition = -50,
+				.col_transition = -50,
+				.well_depth = -50,
+				.hole_depth = -50,
+				.tslot = {50, 50, 50, 50}
+			};
 			return p;
 		}
 
@@ -530,25 +540,41 @@ struct Evaluator {
 
 	struct PlacementWeights {
 		double b2b_clear = 250;
-		double clear1 = -500;
-		double clear2 = -450;
-		double clear3 = -400;
+		double clear1 = -400;
+		double clear2 = -380;
+		double clear3 = -350;
 		double clear4 = 100;
 		double tspin1 = 120;
 		double tspin2 = 480;
 		double tspin3 = 910;
 		double mini_tspin = -120;
 		double perfect_clear = 1200;
-		double combo_garbage = 250;
+		double combo_garbage = 200;
 		//
 		double back_to_back = 150;
-		double wasted_t = -600;
-		double jeopardy = -500;
+		double wasted_t = -350;
+		double jeopardy = -400;
 		double soft_drop = -10;
 
 		static auto default_args() {
-			PlacementWeights p;
-			std::memset(&p, 0, sizeof p);
+			PlacementWeights p{
+				.b2b_clear = 50,
+				.clear1 = 50,
+				.clear2 = 50,
+				.clear3 = 50,
+				.clear4 = 50,
+				.tspin1 = 50,
+				.tspin2 = 50,
+				.tspin3 = 50,
+				.mini_tspin = 50,
+				.perfect_clear = 250,
+				.combo_garbage = 50,
+				.back_to_back = 50,
+				.wasted_t = -50,
+				.jeopardy = -50,
+				.soft_drop = -5
+			};
+
 			return p;
 		}
 
@@ -689,7 +715,7 @@ struct Evaluator {
 		return comboCfg[std::min(comboCfg.size() - 1, static_cast<std::size_t>(std::max(0, combo)))];
 	}
 
-	Result get(const Result& status, TetrisNode& lp, TetrisMap& map, int clear, Piece next_node, int upAtt) {
+	Result get(const Result& status, TetrisNode& lp, const TetrisMap& map, int clear, Piece next_node, int upAtt) {
 		auto result = status;
 		auto safe = getSafe(map, next_node);
 		result.clear = clear;
@@ -891,22 +917,22 @@ struct Evaluator {
 #endif
 
 		if (status.clear == 0) {
-			acc_eval += placement_weights.jeopardy * double(_map.roof - prev_status.attack)
-				/ bitwise::min(20, _map.height) * (prev_status.combo + 1);
+			double hy = _map.roof;
+			acc_eval += placement_weights.jeopardy * hy / bitwise::min(20, _map.height) * (prev_status.combo + 1);
 		}
 
 		//acc_value
 		acc_eval += needSd * placement_weights.soft_drop;
-		
 
-		if (node.type == Piece::T && !((ts > 1 && status.combo > 3) || (node.typeTSpin == TSpinType::TSpin && status.clear > 1))) {
+		if (node.type == Piece::T && !(/*(ts > 1 && status.combo >= 3) ||*/
+			(node.typeTSpin == TSpinType::TSpin && status.clear > 1))) {
 			acc_eval += placement_weights.wasted_t;
 		}
 
 		if (status.clear) {
 			auto comboAtt = getComboAtt(status.combo - 1);
 
-			double comboRatio = 1 + (comboAtt ? std::log(1 + double(comboAtt) / status.attack) : 0);
+			double comboRatio = 1 + (comboAtt ? std::log1p(static_cast<double>(comboAtt) / status.attack) : 0);
 			acc_eval += comboAtt * comboRatio * placement_weights.combo_garbage;
 
 			if (_map.count == 0)
@@ -978,7 +1004,7 @@ class TreeContext {
 public:
 	using Evaluator = Evaluator<TreeContext>;
 	using Result = std::tuple<TetrisNode*, bool>;
-	using NodeDeleter = void(*)(TreeNode*);
+	using NodeDeleter = std::function<void(TreeNode*)>;
 
 private:
 #ifdef USE_MEMORY_BUFFER
@@ -999,11 +1025,15 @@ public:
 	bool isOpenHold = true;
 	std::atomic<int> count = 0;
 	std::vector<Piece> nexts;
-	std::string info{};
+	std::string info;
+	NodeDeleter dele_fn = std::bind(TreeContext::treeDelete, this, std::placeholders::_1);
+	std::vector<std::unique_ptr<lock_free_stack<TreeNode*>>> deads;
 
 	TreeContext(bool delete_byself = false)
-		:root(nullptr, delete_byself ? TreeContext::treeDelete_donothing : TreeContext::treeDelete)
+		:root(nullptr, delete_byself ? TreeContext::treeDelete_donothing : dele_fn)
 	{
+		for (int i = 0; i < 2; i++)
+			deads.emplace_back(new lock_free_stack<TreeNode*>);
 #ifdef USE_MEMORY_BUFFER
 		buf.resize(sizeof(TreeNode) * nodes_reserved);
 		std::destroy_at(&res);
@@ -1016,7 +1046,7 @@ public:
 	};
 
 	~TreeContext() {
-		root.get_deleter() = TreeContext::treeDelete;
+		root.get_deleter() = dele_fn;
 		root.reset(nullptr);
 		return;
 	}
@@ -1027,17 +1057,24 @@ public:
 
 	template<class... Args>
 	TreeNode* alloc_node(Args&&... args) {
-		TreeNode* ptr = get_alloc().new_object<TreeNode>(std::forward<Args>(args)...);
+		TreeNode* ptr = get_alloc().template new_object<TreeNode>(std::forward<Args>(args)...);
 		return ptr;
 	}
 
-	void dealloc_node(TreeNode* ptr) {
+	void dealloc_node(TreeNode* ptr, int type = 0) {
 		get_alloc().delete_object(ptr);
 		return;
 	}
 
-#define USE_VEC_STACK
 	void save(TreeNode* t, bool used) {
+		{
+			auto& dead = this->deads.front();
+			while (!dead->empty()) {
+				if (auto node = dead->pop(); node) {
+					this->dealloc_node(*node);
+				}
+			}
+		}
 		while (true) {
 			auto tree = t->list.pop();
 			if (!tree)
@@ -1080,30 +1117,30 @@ public:
 		return update(tree, queue, fn);
 	}
 
-	void run(int upAtt) {
+	void run(int upAtt, int thread_idx = 0) {
 		using rand_type = std::mt19937; //std::minstd_rand;
 #define init_seed() (static_cast<rand_type::result_type>(std::chrono::system_clock::now().time_since_epoch().count()) \
-		+ std::hash<std::thread::id>{}(std::this_thread::get_id()))
+		^ std::hash<std::thread::id>{}(std::this_thread::get_id()))
 		static thread_local rand_type rng(init_seed());
 #undef init_seed
 		static thread_local std::uniform_real_distribution<> d(0, 1);
-		static const double exploration = std::log(2);
+		static thread_local const double exploration = std::log(2);
 		TreeNode* branch = root.get();
-
 #ifdef USE_SERIS
-#define select() (static_cast<std::size_t>(std::fmod(-std::log(1 - d(rng)) / exploration, branch->children.size() - branch->death_index)))
+#define select(vec) vec[static_cast<std::size_t>(std::fmod(-std::log(1 - d(rng)) / exploration, vec.size()))];
 		int i = 0, m = 0;
 		TreeNode* apex = branch;
 		while (branch->cur != Piece::None) {
 			if (branch->leaf)
 			{
-				branch->extend(apex, i);
+				branch->extend(apex, i, upAtt);
 			}
 			{
 				std::shared_lock guard{ branch->mtx };
 				const auto& branches = branch->children;
-				if (!branches.empty() && branch->children.size() != branch->death_index) {
-					branch = branch->children[select()];
+				if (!branches.empty()) {
+					branch = select(branch->children);
+					upAtt -= branch->props.status.attack;
 					++i += (branch->parent->hold == Piece::None && branch->hold != Piece::None);
 					switch (m) {
 					case 0: apex = branch; m = 1; break;
@@ -1117,15 +1154,22 @@ public:
 		}
 		//std::cout << "complete in a turn;\n";
 #else
-#define select() (static_cast<std::size_t>(std::fmod(-std::log(1. - d(rng)) / exploration, branch->children.size() - branch->death_index)))
+
+#define select(vec) vec[static_cast<std::size_t>(std::fmod(-std::log(1 - d(rng)) / exploration, vec.size()))];
 		int i = 0, flag = 0;
 		TreeNode* apex = branch;
 		while (true) {
-			//branch->occupied.wait(true);
-			std::shared_lock guard(branch->mtx);
-			if (branch->leaf || branch->children.size() == branch->death_index)
+			std::scoped_lock guard(branch->mtx);
+			std::span childs(branch->children.begin(), branch->children.end());
+			if (branch->leaf || childs.empty())
 				break;
-			branch = branch->children[select()];
+#ifdef USE_TEST_CHILDREN_SORTED
+			if (!std::is_sorted(branch->children.begin(), branch->children.end(), TreeNode::TreeNodeCompare)) {
+				std::osyncstream(std::cout) << branch << "\n";
+				exit(-1);
+			}
+#endif
+			branch = select(childs);
 			upAtt -= branch->props.status.attack;
 			++i += (branch->parent->hold == Piece::None && branch->hold != Piece::None);
 			switch (flag) {
@@ -1150,6 +1194,7 @@ public:
 		else if (*node == *root.get()) {
 			info = "undo+";
 			nexts.swap(queue);
+			dealloc_node(node);
 			goto end;
 		}
 		last = root.get();
@@ -1172,6 +1217,7 @@ public:
 			goto end;
 		}
 	end:
+		deads.front().swap(deads.back());
 		return last;
 	}
 
@@ -1204,30 +1250,22 @@ public:
 		return nodes[static_cast<int>(type)];
 	}
 
-	static void treeDelete(TreeNode* t) {
-#ifdef USE_VEC_STACK
-		trivail_vector<TreeNode*> queue;
-		if (t != nullptr) {
-			queue.emplace_back(t);
-		}
-		for (std::size_t i = 0; i < queue.size(); i++) {
-			auto t = queue[i];
-			if (t == nullptr)
-				continue;
-			else {
-				for (auto v : t->children) {
-					queue.emplace_back(v);
+	static void treeDelete(TreeContext* pThis, TreeNode* _t) {
+		if (_t != nullptr) {
+			trivail_vector<TreeNode*> queue;
+			queue.emplace_back(_t);
+			for (std::size_t i = 0; i < queue.size(); i++) {
+				auto t = queue[i];
+				if (t == nullptr)
+					continue;
+				else {
+					for (auto v : t->children) {
+						queue.emplace_back(v);
+					}
 				}
+				pThis->dealloc_node(t);
 			}
-			t->context->dealloc_node(t);
 		}
-#else
-		if (t == nullptr) return;
-		for (auto& child : t->children) {
-			if (child != nullptr) treeDelete(child);
-		}
-		t->context->dealloc_node(t);
-#endif
 	}
 
 	static void treeDelete_donothing(TreeNode* t) {
@@ -1255,6 +1293,7 @@ public:
 
 	constexpr static struct {
 		bool operator()(TreeNode* const& lhs, TreeNode* const& rhs) const {
+			return lhs->props > rhs->props;
 #define USE_BRANCH_LESS
 #ifndef USE_BRANCH_LESS
 			auto a = lhs->leaf || !lhs->children.empty(); //branch[false] -> true/false
@@ -1280,18 +1319,11 @@ private:
 	std::shared_mutex mtx;
 	bool leaf = true;
 	std::atomic<bool> occupied = false;
-	std::size_t death_index = 0;
 	bool isHold = false, isHoldLock = false;
 	Piece cur = Piece::None, hold = Piece::None;
 	EvalArgs props;
 	std::vector<TreeNode*> children;
-	LockFreeList<TreeNode*> list;
-
-	//#define TEST_UNIT_GG_EXIST
-#ifdef TEST_UNIT_GG_EXIST
-	std::atomic<bool> test = false;
-#endif
-
+	lock_free_stack<TreeNode*> list;
 public:
 	TreeNode() {}
 
@@ -1331,7 +1363,7 @@ public:
 		auto status = context->evalutator.get(props.status, land_node, map_, clear, next_node, upAtt);
 		TreeNode* new_tree = nullptr;
 		if (status.deaded != 0) {
-			auto needSd = (land_node.type != Piece::T ? land_node.step : (land_node.typeTSpin == TSpinType::None ? land_node.step : 0));
+			auto needSd = land_node.type != Piece::T ? land_node.step : (land_node.typeTSpin == TSpinType::None ? land_node.step : 0);
 			auto raw = context->evalutator.evalute(land_node, map_, _hold, &context->nexts, index, needSd, status, props.status);
 			EvalArgs props_{
 				land_node,
@@ -1346,12 +1378,6 @@ public:
 			new_tree->isHoldLock = _isHoldLock;
 			{
 				std::scoped_lock guard(mtx);
-				//std::scoped_lock guard(mtx, parent ? parent->mtx : context->mtx);
-#ifdef TEST_UNIT_GG_EXIST
-				if (parent != nullptr && parent->test == true) {
-					std::cout << "ops!\n";
-				}
-#endif
 				children.push_back(new_tree);
 			}
 		}
@@ -1391,7 +1417,6 @@ public:
 			case false:
 				generateChildNodeAll(Search::search(context->getNode(hold), map),
 					false, cur, true, ndx, upAtt);
-
 				[[fallthrough]];
 			case true:
 				generateChildNodeAll(Search::search(context->getNode(cur), map),
@@ -1434,71 +1459,55 @@ public:
 #endif
 
 
-	void repropagate() {
-//#define USE_PARTITAL_UPDATE
-#ifdef USE_PARTITAL_UPDATE
-		std::optional<bool> need_part_updated = std::nullopt;
-		TreeNode* need_part_updated_node = nullptr;
-#endif
-		for (auto it = this; it != nullptr; it = it->parent) {
-			if (it->children.empty()) 
+	void repropagate(TreeNode* from) {
+		if (!from)
+			return;
+		auto it = from;
+		std::unique_lock base(it->mtx);
+		for (; it != nullptr; it = it->parent) {
+			if (it->children.empty())
 				continue;
-			std::scoped_lock guard(it->mtx);
-#ifdef TEST_UNIT_GG_EXIST
-			GG gg(it->test);
-#endif
-#ifdef USE_PARTITAL_UPDATE
-			if (need_part_updated)
-				modify_sorted_batch(it->children, need_part_updated_node, *need_part_updated);
-			else
-#endif
-				pdqsort_branchless(it->children.begin(), it->children.end(), TreeNode::TreeNodeCompare);
+			pdqsort_branchless(it->children.begin(), it->children.end(), TreeNode::TreeNodeCompare);
 			auto improved = Evaluator::Value::lowest();
-			it->death_index = 0;
-			for (auto c = it->children.begin(); c != it->children.end(); ++c) {
-				if (!(*c)->leaf && (*c)->children.empty()) {
-					it->death_index = -std::distance(it->children.end(), c);
-					break;
-				}
+			for (auto c = it->children.begin(); c != it->children.end(); ++c)
 				improved.improve((*c)->props.evaluation + it->props.raw.reward);
-			}
-			if (it->props.evaluation != improved || it == this) {
-				std::scoped_lock guard(it->parent ? it->parent->mtx : context->mtx);
-#ifdef USE_PARTITAL_UPDATE
-				need_part_updated = it->props.evaluation.value > improved.value;
-				need_part_updated_node = it;
-#endif
+			if (it->props.evaluation != improved || it == from) {
+				std::unique_lock guard(it->parent ? it->parent->mtx : context->mtx);
 				it->props.evaluation = improved;
-
+				base = std::move(guard);
 			}
 			else {
-#ifdef USE_PARTITAL_UPDATE
-				need_part_updated.reset();
-				need_part_updated_node = nullptr;
-#endif
 				break;
 			}
 		}
-#undef USE_PARTITAL_UPDATE
 	}
 
 	bool extend(TreeNode* apex, int ndx, int upAtt) {
-		bool result = false, expected = false;
+		bool result = false, expected = false, pruned = false;
 		while (!occupied.compare_exchange_weak(expected, true, std::memory_order_acquire, std::memory_order_relaxed)) {
 			if (expected) {
-				occupied.wait(true);
+				//occupied.wait(true);
 				return false;
 			}
 		}
 		if (leaf && cur != Piece::None) {
-			if (search(ndx, upAtt))
-				apex->list.push(this);
-			{
-				//std::scoped_lock guard(mtx, parent ? parent->mtx : context->mtx);
-				leaf = false;
+			if (auto tail = search(ndx, upAtt); true) {
+				if (children.empty()) {
+					std::scoped_lock guard(mtx, parent ? parent->mtx : context->mtx);
+					if (parent != nullptr) {
+						std::erase(parent->children, this);
+						parent = nullptr;
+						context->count--;
+						context->deads.back()->push(this);
+						pruned = true;
+					}
+				}
+				else if (tail)
+					apex->list.push(this);
 			}
 			result = true;
-			repropagate();
+			repropagate(pruned ? parent : this);
+			leaf = false;
 			goto out;
 		}
 		else {
@@ -1506,7 +1515,7 @@ public:
 		}
 	out:
 		occupied.store(false, std::memory_order_release);
-		occupied.notify_all();
+		//occupied.notify_all();
 		return result;
 	}
 
@@ -1539,7 +1548,7 @@ public:
 	TreeContext::Result pick(int upAtt) {
 		TreeNode* backup = nullptr;
 
-		for (auto mv : std::span{ children.begin(), children.size() - death_index }) {
+		for (auto mv : std::span{ children.begin(), children.size()}) {
 			if (upAtt == 0 || std::all_of(mv->map.top + 3, mv->map.top + 7, [&](auto h) {
 				return upAtt - mv->props.status.attack + h <= 20;
 				})) {
@@ -1620,6 +1629,13 @@ public:
 		using Eval = Evaluator<TreeContext_t>;
 		Eval::BoardWeights board_weights;
 		Eval::PlacementWeights placement_weights;
+
+		static EvalArgs default_args() {
+			return{
+				Eval::BoardWeights::default_args(),
+				Eval::PlacementWeights::default_args()
+			};
+		}
 	};
 
 private:
@@ -1693,10 +1709,11 @@ public:
 
 	void set_delete_byself(bool _delete_byself) {
 		cfg.delete_byself = _delete_byself;
-		context->root.get_deleter() = cfg.delete_byself ? TreeContext_t::treeDelete_donothing : TreeContext_t::treeDelete;
+		context->root.get_deleter() = cfg.delete_byself ? TreeContext_t::treeDelete_donothing : context->dele_fn;
 	}
 
 	void set_board_weights(const EvalArgs& _eval_args) {
+		eval_args = _eval_args;
 		eval_args_freshed = true;
 	}
 
@@ -1737,27 +1754,28 @@ public:
 			receiver.wait();
 		};
 
-		auto last = context->createRoot(cur, field, dp, hold, canHold, b2b, combo, dySpawn, out_exec);
 		auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limitTime);
+		auto last = context->createRoot(cur, field, dp, hold, canHold, b2b, combo, dySpawn, out_exec);
 
 		{
 			Task_manage receiver(thread_num);
-			auto taskrun = [&](TreeContext_t* context) {
+			auto taskrun = [&](TreeContext_t* context, std::size_t index) {
 #ifndef  CLASSIC
 				do {
 #endif
-					context->run(upAtt);
+					context->run(upAtt, index);
 #ifndef  CLASSIC
 				} while (std::chrono::steady_clock::now() < end);
 #endif
 				receiver.arrive();
-				};
+			};
 
-			for (auto i = 0u; i < thread_num; i++)
-				thread_pool->enqueue_detach(taskrun, context.get());
+			for (auto i = 0u; i < thread_num; i++) {
+				thread_pool->enqueue_detach(taskrun, context.get(), i);
+			}
 
 			if (delete_byself)
-				TreeContext_t::treeDelete(last);
+				context->dele_fn(last);
 
 			receiver.wait();
 		}

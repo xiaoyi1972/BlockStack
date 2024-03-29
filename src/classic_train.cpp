@@ -147,7 +147,7 @@ public:
 		ctx.evalutator.board_weights = evalArgs.board_weights, ctx.evalutator.placement_weights = evalArgs.placement_weights;
 
 		ctx.createRoot(start, map, dp, hS.type, hS.able, !!gd.b2b, gd.combo, dySpawn);
-		ctx.run();
+		ctx.run(0);
 		auto [best, ishold] = ctx.getBest(upAtt);
 
 		if (best == nullptr) 

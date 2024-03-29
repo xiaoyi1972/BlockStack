@@ -8,7 +8,6 @@
 #include "timer.hpp"
 #include "tool.h"
 #include "threadPool.h"
-#include "pso.h"
 
 #include "tetrisGame.h"
 //#define TIMER_MEASURE
@@ -307,7 +306,7 @@ void test_others();
 void test_treeNode_death_sort();
 
 #define TestSpeed 0
-#define Play 0
+#define Play 1
 
 void test_const_GameState(const TetrisDelegator::GameState& v) {
 	const auto& [dySpawn, upAtt, bag_v, cur_v, field_v, canHold, hold, b2b, combo, path_sd] = v;
@@ -325,8 +324,6 @@ void test_temp_vec(std::vector<Piece>& dp) {
 
 int main()
 {
-	std::ios_base::sync_with_stdio(false);
-
 #ifdef UNIT
 	TetrisDelegator::GameState v;
 	TetrisDelegator::OutInfo tag;
@@ -362,8 +359,6 @@ int main()
 
 
 #if TestSpeed
-	bench();
-	return 0;
 	TetrisMap map(10, 24);
 	map[19] = 1000000011_r;
 	map[18] = 0000001111_r;
@@ -414,7 +409,7 @@ int main()
 			std::cout << "exception: " << e.what() << std::endl;
 		}
 #ifdef SHOW_WITH_INTERVAL
-		if (auto end = std::chrono::steady_clock::now(); end > start) 
+		if (auto end = std::chrono::steady_clock::now(); end > start)
 		{
 #endif
 			tetris.Draw();
@@ -426,8 +421,9 @@ int main()
 	}
 #else
 	//test_others();
-	//test_treeNode_death_sort();
+	bench();
 
+#ifdef USE_PLAY_BATTLE
 	struct Player {
 		MyTetris unit{};
 		std::size_t wins{ 0 };
@@ -474,7 +470,7 @@ int main()
 				p.unit.playPath(action);
 			}
 
-			//std::cout << "\033[1;1H";
+			std::cout << "\033[1;1H";
 			//player[1].unit.Draw();
 
 			render();
@@ -491,7 +487,7 @@ int main()
 	std::cout << "\033[2J\033[1;1H";
 	std::cout << "total games: " << matches 
 		<< "\n 1 thread won: " << player[0].wins << "\n 2 thread won: " << player[1].wins << "\n";
-
+#endif
 
 #endif
 #endif
@@ -499,7 +495,128 @@ int main()
 
 #include<unordered_set>
 void test_others() {
-#ifndef TEST_MAP_HASH
+
+	std::cout << "std::atomic<std::shared_ptr<int>>:" << std::boolalpha << std::atomic<std::shared_ptr<TetrisNode>>::is_always_lock_free << "\n";
+#ifdef TEST_THIS_ONE
+	struct M {
+		int value;
+		bool dead;
+
+		bool operator<(const M& other) {
+			if (dead == other.dead) {
+				return value > other.value;
+			}
+			else
+				return dead < other.dead;
+		}
+	};
+
+	auto print = [](auto& v) {
+		for (auto& el : v) {
+			std::cout << "{value: " << el.value << ", dead:" << std::boolalpha << el.dead << "}\n";
+		}
+	};
+
+	std::vector<M> vec{
+		/*{4,false},
+		{5,false},*/
+		{1,true},
+		{3,true},
+		//{2,false},
+	};
+
+	std::cout << "before:\n";
+	print(vec);
+	std::sort(vec.begin(), vec.end());
+	std::cout << "\nafter:\n";
+	print(vec);
+
+	std::size_t death_index{};
+
+	for (auto it = vec.begin(); it != vec.end(); ++it) {
+		if (it->dead) {
+			death_index = -std::distance(vec.end(), it);
+			break;
+		}
+	}
+
+	std::cout << "\ndeath_index:" << death_index;
+
+	auto offset = 1;
+
+	//std::cout << "\nlaile " << std::boolalpha << (std::distance(vec.begin(), vec.end()) < offset) << "\n";
+	
+	std::span vec1{ 
+		vec.begin() + (std::distance(vec.begin(), vec.end() - death_index) < offset ? 0 : offset) ,
+		vec.end() - death_index 
+	};
+
+	std::cout << "\nvec1:\n";
+	print(vec1);
+
+
+#endif
+#ifdef TEST_RANDOM_SELECT_GENERATOR
+	using rand_type = std::mt19937; //std::minstd_rand;
+#define init_seed() (static_cast<rand_type::result_type>(std::chrono::system_clock::now().time_since_epoch().count()) \
+		+ std::hash<std::thread::id>{}(std::this_thread::get_id()))
+	rand_type rng(init_seed());
+#undef init_seed
+	std::uniform_real_distribution<> d(0, 1);
+	const double exploration = std::log(100);
+	auto select = [&](std::size_t _range) {
+		return static_cast<std::size_t>(
+			std::fmod(-std::log(1. - d(rng)) / exploration, _range)
+			);
+		};
+	std::map<std::size_t, std::size_t> lut{};
+	int amount = 20000;
+	std::size_t range = 34; //34;
+	for (auto i = 0; i < amount; i++) {
+		auto result = select(range);
+		if (lut.contains(result)) {
+			lut[result]++;
+		}
+		else {
+			lut.try_emplace(result, 1);
+		}
+	}
+
+	for (auto& it : lut) {
+		std::cout << "value:" << std::setw(2) << it.first << " probability:" << double(it.second) / amount << "\n";
+	}
+#endif
+#ifdef TEST_WASTE_T
+	auto test_wast_t = [](const TetrisNode& node, int clear) {
+		bool result = false;
+		if (node.type == Piece::T && !(node.typeTSpin == TSpinType::TSpin && clear > 1))
+			result = true;
+		return result;
+		};
+
+	struct NodeParm {
+		TetrisNode node;
+		int clear;
+	};
+
+	auto get_node = [](TSpinType t_type, int clear) -> NodeParm {
+		auto node = TetrisNode::spawn(Piece::T);
+		node.typeTSpin = t_type;
+		return { .node = node, .clear = clear };
+		};
+
+	std::array types{ TSpinType::None,TSpinType::TSpinMini,TSpinType::TSpin };
+
+	for (const auto& type : types) {
+		for (auto i = 0; i < 4; ++i) {
+			if (type == TSpinType::TSpinMini && i > 1)
+				break;
+			auto np = get_node(type, i);
+			std::cout << type << " with clear(" << i << ") -> " << std::boolalpha << test_wast_t(np.node, np.clear) << "\n";
+		}
+	}
+#endif
+#ifdef TEST_MAP_HASH
 	std::unordered_map<TetrisMap,int> lut;
 	std::ostringstream os;
 	TetrisMap field(10, 22);
@@ -905,12 +1022,12 @@ void bench() {
 
 	std::array pieces{
 		TetrisNode::spawn(Piece::T, nullptr, 19),
-		//TetrisNode::spawn(Piece::O, nullptr, 19),
-		//TetrisNode::spawn(Piece::Z, nullptr, 19),
-		//TetrisNode::spawn(Piece::S, nullptr, 19),
-		//TetrisNode::spawn(Piece::J, nullptr, 19),
-		//TetrisNode::spawn(Piece::L, nullptr, 19),
-		//TetrisNode::spawn(Piece::I, nullptr, 19),
+		TetrisNode::spawn(Piece::O, nullptr, 19),
+		TetrisNode::spawn(Piece::Z, nullptr, 19),
+		TetrisNode::spawn(Piece::S, nullptr, 19),
+		TetrisNode::spawn(Piece::J, nullptr, 19),
+		TetrisNode::spawn(Piece::L, nullptr, 19),
+		TetrisNode::spawn(Piece::I, nullptr, 19),
 	};
 
 
@@ -977,25 +1094,24 @@ void test(F&& f = [](auto...arg) { hello(arg...); }) {
 
 int main(void) {
 
-	int y = 2;
-	test([&](int v) {
-		std::cout << "pass captured lambda with:" << y << "\n";
-		});
-
-	/*const unsigned int thread_num = 4;
+	const unsigned int thread_num = 2;// 4;
 	dp::thread_pool<> pool{ thread_num };
-	LockFreeList<int> list;
+	lock_free_stack<int> list;
+	constexpr auto count = 5;
 	std::vector<std::future<void>> results;
-	std::array<std::atomic<int>, 100000> a(0);
+	std::array<std::atomic<int>, count> a(0);
 	
-	for (auto i = 0; i < 100000; i++) {
+	for (auto i = 0; i < count; i++) {
 		list.push(i);
 	}
 
 	auto get_one = [&]() {
-		while (list.size() != 0) {
+		//while (list.size() != 0) {
+		while (true) {
 			auto v = list.pop();
-			if (v) {
+			if (!v)
+				break;
+			else {
 				std::osyncstream synced_out(std::cout);
 				synced_out << "value:" << *v << " from thread_" << std::this_thread::get_id() << "\n";
 
@@ -1013,7 +1129,7 @@ int main(void) {
 
 	for (auto& k : results) {
 		k.get();
-	}*/
+	}
 	return 0;
 }
 
