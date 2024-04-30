@@ -168,9 +168,11 @@ namespace chrome {
 
 	void Engine::Logic_with(double elapsedTime, MyTetris& tetris)
 	{
-		if (tetris.hK.restartPressed == 1 && tetris.hK.complete_calc) {
-			tetris.restart();
-			tetris.hK.restartPressed = 0;
+		if (tetris.hK.restartPressed == 1) {
+			if ((tetris.hK.botcall_handle && tetris.hK.complete_calc) || !tetris.hK.botcall_handle) {
+				tetris.restart();
+				tetris.hK.restartPressed = 0;
+			}
 		}
 
 		tetris.hK.gameOver = tetris.gd.deaded;
@@ -179,6 +181,7 @@ namespace chrome {
 			return;
 
 		if (tetris.hK.gameOver) { // Do nothing if game over
+			return;
 #define With(active) active->hK.restartPressed = 1;
 			for (auto& player : players)
 				With((&player));
@@ -187,6 +190,7 @@ namespace chrome {
 		}
 
 		if (tetris.hK.complete_calc) {
+			tetris.hK.botcall_handle = std::nullopt;
 			tetris.hK.botOperSource = tetris.playStep();
 			tetris.hK.complete_calc = false;
 			tetris.hK.botReady = 0;

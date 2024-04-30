@@ -326,7 +326,7 @@ namespace dp {
             std::vector<ThreadType> threads_;
             std::deque<task_item> tasks_;
             dp::thread_safe_queue<std::size_t> priority_queue_;
-            std::atomic_int_fast64_t pending_tasks_{};
+            std::atomic<int>/*_int_fast64_t*/ pending_tasks_{};
     };
 
     /**

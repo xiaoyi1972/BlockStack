@@ -29,7 +29,7 @@ struct Handle_keys {
 	int cwPressed = -1, ccwPressed = -1, holdPressed = -1, botPressed = -1, restartPressed = -1;
 	std::atomic<bool> complete_calc = false;
 	int botReady = -1;
-	std::future<void> botcall_handle;
+	std::optional<std::future<void>> botcall_handle;
 	std::vector<Oper> botOperSource;
 	bool started = false, completed = false;
 };

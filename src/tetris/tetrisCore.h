@@ -38,7 +38,7 @@ struct Search {
 		result.reserve(trans * map.width);
 		auto node = first;
 		for (auto i = 0; i++ < 4;) {
-			const auto& points = node.data[node.rs];
+			const auto& points = node.data(node.rs).points;
 			auto [p0, p1] = std::minmax_element(points.begin(), points.end(), [](auto& p0, auto& p1) {return p0.x < p1.x; });
 			if (node.check(map, node.x, node.y, node.rs)) {
 				result.emplace_back(node.type, node.x, node.y, node.rs);
@@ -543,13 +543,13 @@ struct Evaluator {
 		double clear1 = -400;
 		double clear2 = -380;
 		double clear3 = -350;
-		double clear4 = 100;
+		double clear4 = 360;
 		double tspin1 = 120;
 		double tspin2 = 480;
 		double tspin3 = 910;
 		double mini_tspin = -120;
 		double perfect_clear = 1200;
-		double combo_garbage = 200;
+		double combo_garbage = 250;
 		//
 		double back_to_back = 150;
 		double wasted_t = -350;
@@ -739,8 +739,9 @@ struct Evaluator {
 			if (map.count == 0)
 				result.attack += 6;
 		}
-		auto map_rise = status.clear > 0 ? 0 : std::max(0, upAtt);
-		result.deaded = (safe - map_rise) < 0 ? (map_rise > 0 ? -1 : 0) : 1;
+		auto map_rise = result.clear > 0 ? 0 : std::max(0, upAtt);
+		result.deaded = safe < 0 ? 0 : (safe - map_rise < 0 ? -1 : 1);
+		//result.deaded = 1;
 		return result;
 	}
 
@@ -917,8 +918,8 @@ struct Evaluator {
 #endif
 
 		if (status.clear == 0) {
-			double hy = _map.roof;
-			acc_eval += placement_weights.jeopardy * hy / bitwise::min(20, _map.height) * (prev_status.combo + 1);
+			double hy = node.mean_y();// _map.roof;
+			acc_eval += placement_weights.jeopardy * hy / bitwise::min(20, _map.height);
 		}
 
 		//acc_value
@@ -1026,11 +1027,10 @@ public:
 	std::atomic<int> count = 0;
 	std::vector<Piece> nexts;
 	std::string info;
-	NodeDeleter dele_fn = std::bind(TreeContext::treeDelete, this, std::placeholders::_1);
 	std::vector<std::unique_ptr<lock_free_stack<TreeNode*>>> deads;
 
-	TreeContext(bool delete_byself = false)
-		:root(nullptr, delete_byself ? TreeContext::treeDelete_donothing : dele_fn)
+	TreeContext(bool delete_byself = false) :
+		root(nullptr, delete_byself ? TreeContext::treeDelete_donothing : get_delefn())
 	{
 		for (int i = 0; i < 2; i++)
 			deads.emplace_back(new lock_free_stack<TreeNode*>);
@@ -1046,13 +1046,17 @@ public:
 	};
 
 	~TreeContext() {
-		root.get_deleter() = dele_fn;
+		root.get_deleter() = get_delefn();
 		root.reset(nullptr);
 		return;
 	}
 
 	auto& get_alloc() {
 		return alloc;
+	}
+
+	NodeDeleter get_delefn() {
+		return std::bind(TreeContext::treeDelete, this, std::placeholders::_1);
 	}
 
 	template<class... Args>
@@ -1109,12 +1113,46 @@ public:
 			tree->hold = hold;
 			tree->isHoldLock = !canHold;
 			std::memset(&tree->props, 0, sizeof tree->props);
+			tree->props.status.deaded = 1;
 			tree->props.status.b2b = b2b;
 			tree->props.status.combo = combo;
 			tree->props.land_node.type = Piece::None;
 			tree->props.land_node.typeTSpin = TSpinType::None;
 		}
 		return update(tree, queue, fn);
+	}
+
+	void debug_print(const TetrisMap& map, Piece cur, std::vector<Piece>& nexts, Piece hold) {
+		std::ostringstream os;
+		os << "{\n";
+		os << " //TetrisMap map(" << map.width << ", " << map.height << ");\n";
+		os << " map[{0}] = {";
+		for (auto i = 0; i < map.roof; i++) {
+			if (i != 0) {
+				os << ", ";
+			}
+			os << map.data[i];
+		}
+		os << "};\n";
+		os << " tn = TetrisNode::spawn(Piece::" << cur << ", &map, dySpawn);\n";
+		os << " rS.displayBag = {";
+		for (auto i = 0; i < nexts.size(); i++) {
+			if (i != 0) {
+				os << ", ";
+			}
+			os << "Piece::" << nexts[i];
+		}
+		os << "};\n";
+		os << " hS.type = Piece::";
+		if (hold == Piece::None) {
+			os << "None";
+		}
+		else {
+			os << hold;
+		}
+		os << ";\n";
+		os << "}\n\n";
+		std::cout << os.str();
 	}
 
 	void run(int upAtt, int thread_idx = 0) {
@@ -1242,7 +1280,31 @@ public:
 		return { nullptr, false };
 	}
 
+	void test_sorted_all(TreeNode* _t) {
+		auto test_sorted = [](auto branch) {
+			if (!std::is_sorted(branch->children.begin(), branch->children.end(), TreeNode::TreeNodeCompare)) {
+				std::osyncstream(std::cout) << branch << "\n";
+				exit(-1);
+			}
+		};
+		trivail_vector<TreeNode*> queue;
+		queue.emplace_back(_t);
+		for (std::size_t i = 0; i < queue.size(); i++) {
+			auto t = queue[i];
+			if (t == nullptr)
+				continue;
+			else {
+				for (auto v : t->children) {
+					queue.emplace_back(v);
+				}
+			}
+			test_sorted(t);
+		}
+		std::cout << queue.size() << " node:counts:" << count << "\n";
+	}
+
 	Result getBest(int upAtt) {
+		//test_sorted_all(root.get());
 		return root->pick(upAtt);
 	}
 
@@ -1463,8 +1525,7 @@ public:
 		if (!from)
 			return;
 		auto it = from;
-		std::unique_lock base(it->mtx);
-		for (; it != nullptr; it = it->parent) {
+		for (std::unique_lock base(it->mtx); it; it = it->parent) {
 			if (it->children.empty())
 				continue;
 			pdqsort_branchless(it->children.begin(), it->children.end(), TreeNode::TreeNodeCompare);
@@ -1482,31 +1543,46 @@ public:
 		}
 	}
 
+	void prune_death_path(TreeNode*& it) {
+		for (std::unique_lock base(it->mtx); it; it = it->parent) {
+			std::unique_lock guard(it->parent ? it->parent->mtx : it->context->mtx);
+			if (it->parent) {
+				std::erase(it->parent->children, it);
+				/*if (it->parent->children.empty()) {
+					std::cout << "parent:addr(" << it->parent << ")->children.empty() is true\n" << it->parent->map << "\n";
+				}*/
+				it->context->count--;
+				it->context->deads.back()->push(it);
+				if (it->parent->children.empty()) {
+					base = std::move(guard);
+				}
+				else {
+					it = it->parent;
+					break;
+				}
+			}
+		}
+	}
+
 	bool extend(TreeNode* apex, int ndx, int upAtt) {
-		bool result = false, expected = false, pruned = false;
+		bool result = false, expected = false;
 		while (!occupied.compare_exchange_weak(expected, true, std::memory_order_acquire, std::memory_order_relaxed)) {
 			if (expected) {
 				//occupied.wait(true);
+				std::this_thread::yield();
 				return false;
 			}
 		}
-		if (leaf && cur != Piece::None) {
+		if (auto it = this; leaf && cur != Piece::None) {
 			if (auto tail = search(ndx, upAtt); true) {
 				if (children.empty()) {
-					std::scoped_lock guard(mtx, parent ? parent->mtx : context->mtx);
-					if (parent != nullptr) {
-						std::erase(parent->children, this);
-						parent = nullptr;
-						context->count--;
-						context->deads.back()->push(this);
-						pruned = true;
-					}
+					prune_death_path(it);
 				}
 				else if (tail)
-					apex->list.push(this);
+					apex->list.push(it);
 			}
 			result = true;
-			repropagate(pruned ? parent : this);
+			repropagate(it);
 			leaf = false;
 			goto out;
 		}
@@ -1524,6 +1600,7 @@ public:
 			if (tree->children.empty())
 				return;
 			tree = tree->children.front();
+			std::cout << tree->map << "\n";
 		}
 	}
 
@@ -1561,9 +1638,13 @@ public:
 				backup = mv;
 		}
 
-		if (backup == nullptr)
+		if (backup == nullptr) {
+			//context->debug_print(map, cur, context->nexts, hold);
 			return context->empty();
-
+		}
+		/*else {
+			std::cout << "Ã»ËÀ " << "leaf:" << std::boolalpha << backup->leaf << " children.size():" << backup->children.size() << "\n";
+		}*/
 		return { &backup->props.land_node, backup->isHold };
 	}
 
@@ -1709,7 +1790,7 @@ public:
 
 	void set_delete_byself(bool _delete_byself) {
 		cfg.delete_byself = _delete_byself;
-		context->root.get_deleter() = cfg.delete_byself ? TreeContext_t::treeDelete_donothing : context->dele_fn;
+		context->root.get_deleter() = cfg.delete_byself ? TreeContext_t::treeDelete_donothing : context->get_delefn();
 	}
 
 	void set_board_weights(const EvalArgs& _eval_args) {
@@ -1774,8 +1855,10 @@ public:
 				thread_pool->enqueue_detach(taskrun, context.get(), i);
 			}
 
+			//taskrun(context.get(), 0);
+
 			if (delete_byself)
-				context->dele_fn(last);
+				std::invoke(TreeContext_t::treeDelete, context.get(), last);
 
 			receiver.wait();
 		}

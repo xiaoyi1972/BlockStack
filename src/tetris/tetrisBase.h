@@ -251,11 +251,11 @@ public:
 	}
 
 	TetrisMapDelegate<TetrisMap> operator[](std::initializer_list<std::size_t> list) {
-		return  { *this,list };
+		return { *this, list };
 	}
 
 	auto& operator[](std::size_t index) const {
-		return  data[index];
+		return data[index];
 	}
 
 	void update() {
@@ -481,15 +481,13 @@ public:
 	std::size_t fillRows(TetrisMap& map, int x, int y, int rs) {
 		const auto& points = data(rs).points;
 		std::size_t count = 0;
-		int full = (1 << map.width) - 1, row{};
-		std::optional<int> pre;
+		int full = (1 << map.width) - 1, pre = -1, row{};
 		for (auto& point : points) {
 			auto px = point.x + x, py = point.y + y;
-			if (!pre || *pre != py) 
+			if (pre != py) 
 				row = map[py];
 			row |= (1 << px);
-			if (row == full) 
-				count++;
+			count += (row == full);
 			pre = py;
 		}
 		return count;
@@ -611,9 +609,10 @@ public:
 	}
 
 	int mean_y() const{
-		const auto& points = data(rs).points;
-		auto [y0, y1] = std::minmax_element(points.begin(), points.end(), [](auto& p0, auto& p1) {return p0.y < p1.y; });
-		return ((y0->y + y) + (y1->y + y)) / 2;
+		//const auto& points = data(rs).points;
+		auto& [y0, y1] = data(rs).y_range;
+		//auto [y0, y1] = std::minmax_element(points.begin(), points.end(), [](auto& p0, auto& p1) {return p0.y < p1.y; });
+		return ((y0 + y) + (y1 + y)) / 2;
 	}
 
 	void print(std::ostream& out) const {
@@ -621,7 +620,7 @@ public:
 	}
 
 	auto mapping(const TetrisMap& map, bool simple = false) const {
-		return printNode{ map,*this ,simple };
+		return printNode{ map, *this, simple };
 	}
 
 	static constexpr std::array rotateDatas{

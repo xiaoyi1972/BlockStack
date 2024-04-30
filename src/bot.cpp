@@ -306,7 +306,7 @@ void test_others();
 void test_treeNode_death_sort();
 
 #define TestSpeed 0
-#define Play 1
+#define Play 0
 
 void test_const_GameState(const TetrisDelegator::GameState& v) {
 	const auto& [dySpawn, upAtt, bag_v, cur_v, field_v, canHold, hold, b2b, combo, path_sd] = v;
@@ -421,7 +421,21 @@ int main()
 	}
 #else
 	//test_others();
-	bench();
+	//bench();
+
+	TetrisMap field(10, 22);
+	field[6] = 1111101111_r;
+	field[1] = 1111000111_r;
+	field[0] = 1111101111_r;
+	field.update();
+	auto node = TetrisNode::spawn(Piece::O, &field);
+	node.y = 3, node.x += 1, node.rs = 0;
+	std::cout << node.mapping(field)
+		<< " fill_rows:" << node.fillRows(field, node.x, node.y, node.rs)
+		/* << " open:" << std::boolalpha << node.open(field)*/
+		<< " dropdis:" << node.getDrop(field)
+		<< "\n";
+
 
 #ifdef USE_PLAY_BATTLE
 	struct Player {
@@ -448,7 +462,7 @@ int main()
 	player[0].unit.setOpponent(&player[1].unit);
 	player[1].unit.setOpponent(&player[0].unit);
 
-	auto matches = 50, cal_time = 100;
+	auto matches = 200, cal_time = 100;
 	const char* sign = "\\|/-";
 	int idx = 0;
 
@@ -470,11 +484,11 @@ int main()
 				p.unit.playPath(action);
 			}
 
-			std::cout << "\033[1;1H";
+			//std::cout << "\033[1;1H";
 			//player[1].unit.Draw();
 
-			render();
-			//std::cout << "\033[1;1H";
+			//render();
+			std::cout << "\033[1;1H";
 			std::cout << sign[idx] << " process: " << i << "/" << matches << "\033[0K\n";
 			std::cout << "\033[0K\n1 thread won: " << player[0].wins << "\033[0K\n2 thread won: " << player[1].wins << "\033[0K\n";
 			idx++;

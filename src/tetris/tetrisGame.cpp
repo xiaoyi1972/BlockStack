@@ -329,14 +329,29 @@ void TetrisGame::hardDrop() {
 }
 
 void TetrisGame::restart() {
-	rS = Random{}, hS = Hold{}, gd = gameData{};
-    map = TetrisMapEx{ 10, 40 };
+	rS = Random{}, hS = Hold{}, gd = gameData{}, map = TetrisMapEx{ 10, 40 };
 
     //map = TetrisMapEx(10, 10);
     //dySpawn = 0;
+   
+    tn = TetrisNode::spawn(rS.getOne(), &map, dySpawn);
 
-    tn = TetrisNode{ TetrisNode::spawn(rS.getOne(),&map,dySpawn) };
+
+    if(0)
+    {
+        //TetrisMap map(10, 40);
+        //map[{0}] = { 895, 991, 1007, 1019, 1022, 1015, 1022, 767, 1021, 959, 511, 991, 1015, 1019, 511, 1019, 951, 358, 7, 3, 14, 8 };
+        map[{0}] = { 895, 991, 1007, 1019, 1022, 1015, 1022, 767, 1021, 959, 511, 991, 1015, 1019, 511, 1019, 951, 358, 7, 3 };
+        tn = TetrisNode::spawn(Piece::J, &map, dySpawn);
+       // tn = TetrisNode::spawn(Piece::O, &map, dySpawn);
+       // rS.displayBag = { Piece::O, Piece::S, Piece::Z, Piece::J, Piece::I, Piece::T };
+        rS.bag = { Piece::T };
+        rS.displayBag = { Piece::O, Piece::O, Piece::S, Piece::Z, Piece::J, Piece::I };// , Piece::T};
+        hS.type = Piece::S;
+    }
+	
     switchMode(mode, true);
+    map.update(true);
 
     if constexpr (My::test) {
 

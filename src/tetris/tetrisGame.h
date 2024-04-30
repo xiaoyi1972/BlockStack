@@ -25,7 +25,7 @@
 //#define CLASSIC
 
 template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; }; // helper type for the visitor #4
-template<class... Ts> overloaded(Ts...)->overloaded<Ts...>; // explicit deduction guide (not needed as of C++20)
+template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>; // explicit deduction guide (not needed as of C++20)
 
 namespace My {
 	static constexpr bool  test = false ^ 0;
@@ -88,8 +88,8 @@ public:
 namespace Modes {
 	struct dig {
 		int digRows = digRowUpper;
-		int digRowUpper = 15;
-		int digRowsEnd = 100;
+		int digRowUpper = 18;
+		int digRowsEnd = 10000;
 
 		template<class T>
 		void digModAdd(T* tg, int needDigRows, bool isInit) {
@@ -102,7 +102,7 @@ namespace Modes {
 					num = int(randSys.randGen() % 10);
 					row &= ~(1 << num);
 				} while (row == map[0]);
-				memmove(map.data + 1, map.data, (map.height - 1) * sizeof(int));
+				std::memmove(map.data + 1, map.data, (map.height - 1) * sizeof(int));
 				map.data[0] = row;
 				if (!isInit) {
 					map.colorDatas.pop_back();
@@ -123,7 +123,8 @@ namespace Modes {
 						digRows--;
 				}
 				if (clear.size() == 0) {
-					auto needDigRows = digRowUpper - digRows;
+					auto roof = *std::max_element(map.top + 3, map.top + 7);
+					auto needDigRows = std::max(0, std::min(20 - roof - 2, digRowUpper - digRows));
 					digRowsEnd -= needDigRows;
 					digModAdd(tg, needDigRows, false);
 					digRows = digRowUpper;
@@ -150,7 +151,7 @@ namespace Modes {
 				num = int(rS.randGen() % 10);
 				row &= ~(1 << num);
 				for (auto i = 0; i < rows; i++) {
-					memmove(map.data + 1, map.data, (map.height - 1) * sizeof(int));
+					std::memmove(map.data + 1, map.data, (map.height - 1) * sizeof(int));
 					map.data[0] = row;
 					map.colorDatas.pop_back();
 					map.colorDatas.insert(map.colorDatas.begin(), std::vector<Piece>(map.width, Piece::Trash));
@@ -226,7 +227,7 @@ protected:
 	gameData gd;
 	std::variant<Modes::versus, Modes::dig, Modes::sprint> gm;
 	TetrisMapEx map{ 10, 40 };
-	TetrisNode tn{ TetrisNode::spawn(rS.getOne(), &map,dySpawn) };
+	TetrisNode tn{ TetrisNode::spawn(rS.getOne(), &map, dySpawn) };
 	Recorder record{ rS.seed }, recordPath{ rS.seed };
 	std::chrono::time_point<std::chrono::high_resolution_clock> startTime;
 

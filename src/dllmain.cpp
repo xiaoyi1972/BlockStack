@@ -11,7 +11,7 @@
 #include <execution>
 
 
-static const unsigned int threads = 1u;
+static const unsigned int threads = 2u;
 
 #define USE_CONSOLE 0
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)

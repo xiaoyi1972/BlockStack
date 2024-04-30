@@ -131,16 +131,16 @@ void pso_logic(pso_config const& config, pso_data const& best, pso_data& item, s
 			+ std::uniform_real_distribution<double>(0, config.c1)(mt) * (item.p[i] - item.x[i])
 			+ std::uniform_real_distribution<double>(0, config.c2)(mt) * (best.p[i] - item.x[i])
 			;
-		item.x[i] = std::clamp(item.x[i], cfg.x_min, cfg.x_max);
-		item.v[i] = std::clamp(item.v[i], -cfg.v_max, cfg.v_max);
-		/*if (item.v[i] > cfg.v_max)
+		//item.x[i] = std::clamp(item.x[i], cfg.x_min, cfg.x_max);
+		//item.v[i] = std::clamp(item.v[i], -cfg.v_max, cfg.v_max);
+		if (item.v[i] > cfg.v_max)
 		{
 			item.v[i] = cfg.v_max;
 		}
 		if (item.v[i] < -cfg.v_max)
 		{
 			item.v[i] = -cfg.v_max;
-		}*/
+		}
 	}
 }
 
@@ -469,20 +469,20 @@ int main(int argc, char const* argv[])
 	{
 		EvalArgs p = EvalArgs::default_args();
 
-		v(p.board_weights.height[0], 100, 2);
-		v(p.board_weights.height[1], 100, 2);
-		v(p.board_weights.height[2], 100, 2);
-		v(p.board_weights.holes, 100, 2);
-		v(p.board_weights.hole_lines, 300, 2);
-		v(p.board_weights.cells_coveredness, 100, 2);
-		v(p.board_weights.row_transition, 100, 2);
-		v(p.board_weights.col_transition, 100, 2);
-		v(p.board_weights.well_depth, 200, 2);
-		v(p.board_weights.hole_depth, 200, 2);
-		v(p.board_weights.tslot[0], 500, 2);
-		v(p.board_weights.tslot[1], 500, 2);
-		v(p.board_weights.tslot[2], 500, 2);
-		v(p.board_weights.tslot[3], 500, 2);
+		v(p.board_weights.height[0], 100, 8);
+		v(p.board_weights.height[1], 100, 8);
+		v(p.board_weights.height[2], 100, 8);
+		v(p.board_weights.holes, 100, 8);
+		v(p.board_weights.hole_lines, 400, 8);
+		v(p.board_weights.cells_coveredness, 200, 8);
+		v(p.board_weights.row_transition, 200, 8);
+		v(p.board_weights.col_transition, 200, 8);
+		v(p.board_weights.well_depth, 250, 8);
+		v(p.board_weights.hole_depth, 250, 8);
+		v(p.board_weights.tslot[0], 500, 8);
+		v(p.board_weights.tslot[1], 500, 8);
+		v(p.board_weights.tslot[2], 500, 8);
+		v(p.board_weights.tslot[3], 500, 8);
 		v(p.placement_weights.b2b_clear, 100, 2);
 		v(p.placement_weights.clear1, 100, 2);
 		v(p.placement_weights.clear2, 100, 2);
@@ -497,7 +497,7 @@ int main(int argc, char const* argv[])
 		v(p.placement_weights.back_to_back, 100, 2);
 		v(p.placement_weights.wasted_t, 100, 2);
 		v(p.placement_weights.jeopardy, 100, 2);
-		v(p.placement_weights.soft_drop, 50, 2, -50);
+		v(p.placement_weights.soft_drop, 50, 0.5, -50);
 
 		if (rank_table.empty())
 		{
