@@ -296,7 +296,7 @@ public:
 	TetrisDelegator bot = TetrisDelegator::launch({
 		.use_static = true,
 		.delete_byself = true,
-		.thread_num = 2u
+		.thread_num = 1u
 	});
 };
 
@@ -306,7 +306,7 @@ void test_others();
 void test_treeNode_death_sort();
 
 #define TestSpeed 0
-#define Play 0
+#define Play 1
 
 void test_const_GameState(const TetrisDelegator::GameState& v) {
 	const auto& [dySpawn, upAtt, bag_v, cur_v, field_v, canHold, hold, b2b, combo, path_sd] = v;
@@ -423,18 +423,69 @@ int main()
 	//test_others();
 	//bench();
 
+
+	auto tslot_tsd = [](const TetrisMap& map) -> std::optional<TetrisNode> {
+		for (auto x = 0; x < map.width - 2; x++) {
+			const auto h0 = map.top[x] - 1, h1 = map.top[x + 1] - 1, h2 = map.top[x + 2] - 1;
+			if (h1 <= h2 - 1 && map(x, h2) && !map(x, h2 + 1) && map(x, h2 + 2)) {
+				std::cout << TetrisNode(Piece::T, x, h2, 2).mapping(map)  << "type[1]" << "\n";
+				return std::make_optional<TetrisNode>(Piece::T, x, h2, 2);
+			}
+		}
+		for (auto x = 0; x < map.width - 2; x++) {
+			const auto h0 = map.top[x] - 1, h1 = map.top[x + 1] - 1, h2 = map.top[x + 2] - 1;
+			if (h1 <= h0 - 1 && map(x + 2, h0) && !map(x + 2, h0 + 1) && map(x + 2, h0 + 2)) {
+				std::cout << TetrisNode(Piece::T, x, h0, 2).mapping(map) << "type[2]" << "\n";
+				return std::make_optional<TetrisNode>(Piece::T, x, h0, 2);
+			}
+		}
+		return std::nullopt;
+	};
+
+
+	auto tslot_tst = [](const TetrisMap& map) -> std::optional<TetrisNode> {
+		for (auto x = 0; x < map.width - 2; x++) {
+			const auto h0 = map.top[x] - 1, h1 = map.top[x + 1] - 1, h2 = map.top[x + 2] - 1;
+			if (h0 <= h1 && h1 < h2) {
+				if (map(x - 1, h1 + 1) == map(x - 1, h1 + 2) &&
+					!map(x + 1, h1 - 1) &&
+					!map(x + 2, h1) && !map(x + 2, h1 - 1) && !map(x + 2, h1 - 2) && !map(x + 2, h1 + 1) && map(x + 2, h1 + 2)
+					) {
+					std::cout << TetrisNode(Piece::T, x + 1, h1 - 2, 3).mapping(map) << "type[1]" << "\n";
+					return std::make_optional<TetrisNode>(Piece::T, x + 1, h1 - 2, 3);
+				}
+			}
+			else if (h2 <= h1 && h1 < h0) {
+				if (map(x + 3, h1 + 1) == map(x + 3, h1 + 2) &&
+					!map(x + 1, h1 - 1) &&
+					!map(x, h1) && !map(x, h1 - 1) && !map(x, h1 - 2) && !map(x, h1 + 1) && map(x, h1 + 2)
+					) {
+					std::cout << TetrisNode(Piece::T, x - 1, h1 - 2, 1).mapping(map) << "type[2]" << "\n";
+					return std::make_optional<TetrisNode>(Piece::T, x - 1, h1 - 2, 1);
+				}
+			}
+		}
+		return std::nullopt;
+		};
+
 	TetrisMap field(10, 22);
-	field[6] = 1111101111_r;
-	field[1] = 1111000111_r;
-	field[0] = 1111101111_r;
+	field[4] = 0b0000000001;
+	field[3] = 0b0000000000;
+	field[2] = 0b1111111110;
+	field[1] = 0b1111111100;
+	field[0] = 0b1111111110;
 	field.update();
-	auto node = TetrisNode::spawn(Piece::O, &field);
+
+	std::cout << "map:\n" << field << "\n";
+	tslot_tst(field);
+
+	/*auto node = TetrisNode::spawn(Piece::O, &field);
 	node.y = 3, node.x += 1, node.rs = 0;
 	std::cout << node.mapping(field)
 		<< " fill_rows:" << node.fillRows(field, node.x, node.y, node.rs)
-		/* << " open:" << std::boolalpha << node.open(field)*/
+		// << " open:" << std::boolalpha << node.open(field)
 		<< " dropdis:" << node.getDrop(field)
-		<< "\n";
+		<< "\n";*/
 
 
 #ifdef USE_PLAY_BATTLE

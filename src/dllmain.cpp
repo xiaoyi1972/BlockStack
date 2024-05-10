@@ -1,19 +1,18 @@
 ﻿// dllmain.cpp : 定义 DLL 应用程序的入口点。
-#include <windows.h>
 #include <ctime>
-#include <vector>
 #include "tetrisGame.h"
 #include "tetrisCore.h"
 #include "threadPool.h"
 #include <vector>
 #include <iostream>
 #include <algorithm>
-#include <execution>
-
 
 static const unsigned int threads = 2u;
 
 #define USE_CONSOLE 0
+
+#ifdef _MSC_VER
+#include <windows.h>
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
     FILE* stream;
@@ -32,6 +31,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
     }
     return TRUE;
 }
+#endif
 
 #ifndef WINVER
 #define WINVER 0x0500
@@ -65,7 +65,11 @@ extern "C" DECLSPEC_EXPORT char* __cdecl AIName(int level)
     static std::string name1 = "test";
     if (threads > 1) 
 		name1 += "_t" + std::to_string(threads);
+#ifdef _MSC_VER
     strcpy_s(name, name1.c_str());
+#else
+    strcpy(name, name1.c_str());
+#endif
     return name;
 }
 
@@ -131,6 +135,8 @@ extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], 
         return result;
     }
 
+    //std::cout << "dll call\n";
+
     //TetrisMap map{ 10, 40 };
 
 #if USE_TEST
@@ -165,15 +171,16 @@ extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], 
     v.dySpawn = -18;
 	v.cur = TetrisNode::spawn(cur_type, &v.field(), v.dySpawn);
 
-    for (auto it = next; *it != '\0'; it++) { 
-		v.bag->emplace_back(typeConvert(*it));
+	for (auto i = 0; i < maxDepth; i++) {
+		v.bag->emplace_back(typeConvert(next[i]));
     }
 
 #ifdef USE_OUTPUT_INFO
-    std::cout << "preview:";
-    for (auto it : v.nexts) {
+    std::cout << "preview:{";
+    for (auto it : v.bag()) {
         std::cout << it;
     }
+	std::cout << "}\n";
 #endif
     
 	v.hold = (hold == ' ') ? Piece::None : typeConvert(hold);
@@ -184,7 +191,9 @@ extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], 
 
 	static TetrisDelegator bot = TetrisDelegator::launch({ .use_static = true,.delete_byself = true,.thread_num = threads });
     auto call = [&](TetrisNode &start, TetrisMap &field, const int limitTime) -> std::vector<Oper>{
+        //std::cout << "start callbot.\n";
         bot.run(v, limitTime);
+        //std::cout << "start callbot make_path..\n";
         auto path = bot.suggest(v, tag);
         if (!path) {
             path = std::vector<Oper>{ Oper::HardDrop };
@@ -209,6 +218,7 @@ extern "C" DECLSPEC_EXPORT char* __cdecl TetrisAI(int overfield[], int field[], 
     std::memcpy(result, pathStr.data(), pathStr.size());
     result += pathStr.size();
     result[0] = '\0';
+    //std::cout << "end\n\n";
 #endif
     return result_buffer[player];
 }

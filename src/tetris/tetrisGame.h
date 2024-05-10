@@ -39,7 +39,7 @@ public:
 
 	Random(unsigned _seed = std::chrono::system_clock::now().time_since_epoch().count()) :seed(_seed) {
 		//std::cout << "_seed:" << _seed << "\n";
-		//seed = 3366990943;
+		//seed = 2997737280;
 		randGen.seed(seed);
 	}
 

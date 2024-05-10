@@ -464,6 +464,35 @@ namespace {
 		using Result = decltype(Unpack(Tuple()));
 	};
 
+	template <class T, T... As, T... Bs>
+	constexpr std::integer_sequence<T, As..., Bs...> operator+(std::integer_sequence < T, As...>,
+		std::integer_sequence < T, Bs...>)
+	{
+		return {};
+	}
+
+	template <class F, class T, T Val>
+	constexpr auto filter_single(std::integer_sequence<T, Val>, F predicate) {
+		if constexpr (predicate(Val)) {
+			return std::integer_sequence<T, Val>{};
+		}
+		else {
+			return std::integer_sequence<T>{};
+		}
+	}
+
+	template <class F, class T, T... Vals>
+	constexpr auto filter(std::integer_sequence<T, Vals...>, F predicate) {
+		return (filter_single(std::integer_sequence<T, Vals>{}, predicate) + ...);
+	}
+
+
+	template <class Pred, class Type, Type... I>
+	constexpr auto filter_integer_sequence(std::integer_sequence<Type, I...> sequence, Pred p) {
+		return filter(sequence, p);
+	}
+
+	/*
 	template <auto Pred, class Type, Type... I>
 	constexpr auto filter_integer_sequence(std::integer_sequence<Type, I...>) {
 		return typename filter_integer_sequence_impl<Pred, Type, I...>::Result();
@@ -473,6 +502,7 @@ namespace {
 	constexpr auto filter_integer_sequence(std::integer_sequence<Type, I...> sequence, Pred) {
 		return filter_integer_sequence<(Pred*)nullptr>(sequence);
 	}
+	*/
 
 	template<std::size_t N>
 	constexpr auto bit_seq_tuple(std::size_t v) {

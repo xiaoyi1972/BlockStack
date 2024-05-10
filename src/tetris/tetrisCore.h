@@ -447,7 +447,7 @@ struct Evaluator {
 	};
 
 	struct BoardWeights {
-#define Factor * 6 //3
+#define Factor * 6 //6 //3
 		double height[3] = { -10.4699 Factor, 0 Factor, 0 Factor };
 		double holes = 0 Factor;
 		double hole_lines = -23.3727 Factor;
@@ -555,6 +555,7 @@ struct Evaluator {
 		double wasted_t = -350;
 		double jeopardy = -400;
 		double soft_drop = -10;
+		double attack = 40;
 
 		static auto default_args() {
 			PlacementWeights p{
@@ -739,9 +740,8 @@ struct Evaluator {
 			if (map.count == 0)
 				result.attack += 6;
 		}
-		auto map_rise = result.clear > 0 ? 0 : std::max(0, upAtt);
+		auto map_rise = result.clear > 0 ? 0 : upAtt;
 		result.deaded = safe < 0 ? 0 : (safe - map_rise < 0 ? -1 : 1);
-		//result.deaded = 1;
 		return result;
 	}
 
@@ -758,7 +758,7 @@ struct Evaluator {
 		transient_eval += board_weights.height[1] * bitwise::max(highest_point - 10, 0);
 		transient_eval += board_weights.height[2] * bitwise::max(highest_point - 15, 0);
 
-		auto ts = std::max(std::count(nexts->begin() + index, nexts->end(), Piece::T) + static_cast<int>(hold == Piece::T), 1);
+		auto ts = std::max<int>(std::count(nexts->begin() + index, nexts->end(), Piece::T) + static_cast<int>(hold == Piece::T), 1);
 
 		if (_map.roof >= 15)
 			ts = 0;
@@ -918,19 +918,19 @@ struct Evaluator {
 #endif
 
 		if (status.clear == 0) {
-			double hy = node.mean_y();// _map.roof;
+			double hy = node.mean_y() + 1;
 			acc_eval += placement_weights.jeopardy * hy / bitwise::min(20, _map.height);
 		}
 
 		//acc_value
 		acc_eval += needSd * placement_weights.soft_drop;
-
 		if (node.type == Piece::T && !(/*(ts > 1 && status.combo >= 3) ||*/
 			(node.typeTSpin == TSpinType::TSpin && status.clear > 1))) {
 			acc_eval += placement_weights.wasted_t;
 		}
 
 		if (status.clear) {
+			acc_eval += status.attack * placement_weights.attack;
 			auto comboAtt = getComboAtt(status.combo - 1);
 
 			double comboRatio = 1 + (comboAtt ? std::log1p(static_cast<double>(comboAtt) / status.attack) : 0);
@@ -981,7 +981,7 @@ struct Evaluator {
 
 	int getSafe(const TetrisMap& map, Piece next_node) {
 		int safe = std::numeric_limits<int>::max();
-		if (next_node != Piece::None) [[unlikely]] {
+		if (next_node != Piece::None) [[likely]] {
 			safe = context->getNode(next_node).getDrop(map);
 			}
 		else {
@@ -1094,7 +1094,7 @@ public:
 		}
 	}
 
-	using SaveFnCaller = self_args_func_t<&save>;
+	using SaveFnCaller = self_args_func_t<&TreeContext::save>;
 
 	template<class F = SaveFnCaller>
 	TreeNode* createRoot(const TetrisNode& node, const TetrisMap& map, std::vector<Piece>& dp, Piece hold, bool canHold,
@@ -1103,6 +1103,9 @@ public:
 		auto queue = nexts;
 		nexts = dp;
 		nodes.clear();
+
+		//debug_print(map, node.type, nexts, hold);
+
 		for (auto i = 0; i < 7; i++)
 			nodes.push_back(TetrisNode::spawn(static_cast<Piece>(i), &map, dySpawn));
 		TreeNode* tree = alloc_node();
@@ -1156,9 +1159,12 @@ public:
 	}
 
 	void run(int upAtt, int thread_idx = 0) {
-		using rand_type = std::mt19937; //std::minstd_rand;
+		using rand_type = //std::mt19937; 
+			std::minstd_rand;
 #define init_seed() (static_cast<rand_type::result_type>(std::chrono::system_clock::now().time_since_epoch().count()) \
 		^ std::hash<std::thread::id>{}(std::this_thread::get_id()))
+		//static thread_local rand_type rng(([]() {
+			//auto seed = 902212590/*init_seed()*/; std::osyncstream(std::cout) << "seed:" << seed << "\n"; return seed; })());
 		static thread_local rand_type rng(init_seed());
 #undef init_seed
 		static thread_local std::uniform_real_distribution<> d(0, 1);
@@ -1192,8 +1198,8 @@ public:
 		}
 		//std::cout << "complete in a turn;\n";
 #else
-
-#define select(vec) vec[static_cast<std::size_t>(std::fmod(-std::log(1 - d(rng)) / exploration, vec.size()))];
+#define select(vec) vec[static_cast<std::size_t>(std::fmod(-std::log(1 - d(rng)) / exploration, vec.size()))]
+#define sat_sub(a, b) ((a - b) * (a >= b))
 		int i = 0, flag = 0;
 		TreeNode* apex = branch;
 		while (true) {
@@ -1208,7 +1214,7 @@ public:
 			}
 #endif
 			branch = select(childs);
-			upAtt -= branch->props.status.attack;
+			upAtt = sat_sub(upAtt, branch->props.status.attack);
 			++i += (branch->parent->hold == Piece::None && branch->hold != Piece::None);
 			switch (flag) {
 			case 0: apex = branch; flag = 1; break;
@@ -1353,7 +1359,12 @@ public:
 		}
 	};
 
-	constexpr static struct {
+
+	static bool TreeNodeCompare(TreeNode* const& lhs, TreeNode* const& rhs){
+		return lhs->props > rhs->props;
+	}
+
+	/*constexpr static struct {
 		bool operator()(TreeNode* const& lhs, TreeNode* const& rhs) const {
 			return lhs->props > rhs->props;
 #define USE_BRANCH_LESS
@@ -1372,7 +1383,7 @@ public:
 #endif
 #undef USE_BRANCH_LESS
 		}
-	}TreeNodeCompare{};
+	}TreeNodeCompare{};*/
 
 private:
 	TreeNode* parent = nullptr;
@@ -1458,14 +1469,12 @@ public:
 	template<size_t select = 0>
 	bool search_hold(int ndx, int upAtt) {
 		if constexpr (select == 0) {
-			if (hold == Piece::None && context->nexts.size() > 0) return search_hold<1>(ndx, upAtt);
+			if (hold == Piece::None) return search_hold<1>(ndx, upAtt);
 			else return search_hold<2>(ndx, upAtt);
 		}
 		else if constexpr (select == 1) { //hold is none
-			if (cur != Piece::None) {
-				generateChildNodeAll(Search::search(context->getNode(cur), map),
-					false, hold, false, ndx, upAtt);
-			}
+			generateChildNodeAll(Search::search(context->getNode(cur), map),
+				false, hold, false, ndx, upAtt);
 			if (std::size_t after = ndx; hold == Piece::None && after < context->nexts.size()) {
 				auto take = context->nexts[after];
 				if (take != cur) {
@@ -1548,9 +1557,6 @@ public:
 			std::unique_lock guard(it->parent ? it->parent->mtx : it->context->mtx);
 			if (it->parent) {
 				std::erase(it->parent->children, it);
-				/*if (it->parent->children.empty()) {
-					std::cout << "parent:addr(" << it->parent << ")->children.empty() is true\n" << it->parent->map << "\n";
-				}*/
 				it->context->count--;
 				it->context->deads.back()->push(it);
 				if (it->parent->children.empty()) {
@@ -1569,7 +1575,6 @@ public:
 		while (!occupied.compare_exchange_weak(expected, true, std::memory_order_acquire, std::memory_order_relaxed)) {
 			if (expected) {
 				//occupied.wait(true);
-				std::this_thread::yield();
 				return false;
 			}
 		}
@@ -1624,7 +1629,6 @@ public:
 
 	TreeContext::Result pick(int upAtt) {
 		TreeNode* backup = nullptr;
-
 		for (auto mv : std::span{ children.begin(), children.size()}) {
 			if (upAtt == 0 || std::all_of(mv->map.top + 3, mv->map.top + 7, [&](auto h) {
 				return upAtt - mv->props.status.attack + h <= 20;
@@ -1639,12 +1643,8 @@ public:
 		}
 
 		if (backup == nullptr) {
-			//context->debug_print(map, cur, context->nexts, hold);
 			return context->empty();
 		}
-		/*else {
-			std::cout << "Ã»ËÀ " << "leaf:" << std::boolalpha << backup->leaf << " children.size():" << backup->children.size() << "\n";
-		}*/
 		return { &backup->props.land_node, backup->isHold };
 	}
 
@@ -1837,10 +1837,10 @@ public:
 
 		auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(limitTime);
 		auto last = context->createRoot(cur, field, dp, hold, canHold, b2b, combo, dySpawn, out_exec);
-
 		{
 			Task_manage receiver(thread_num);
 			auto taskrun = [&](TreeContext_t* context, std::size_t index) {
+
 #ifndef  CLASSIC
 				do {
 #endif
@@ -1848,17 +1848,25 @@ public:
 #ifndef  CLASSIC
 				} while (std::chrono::steady_clock::now() < end);
 #endif
+
+				/*for (int i = 0; i < 2500; i++) {
+					context->run(upAtt, index);
+				}*/
 				receiver.arrive();
 			};
 
+
+			
 			for (auto i = 0u; i < thread_num; i++) {
 				thread_pool->enqueue_detach(taskrun, context.get(), i);
 			}
+			
 
 			//taskrun(context.get(), 0);
 
-			if (delete_byself)
+			if (delete_byself) {
 				std::invoke(TreeContext_t::treeDelete, context.get(), last);
+			}
 
 			receiver.wait();
 		}
@@ -1869,7 +1877,7 @@ public:
 		auto& [dySpawn, upAtt, bag, cur, field, canHold, hold, b2b, combo, path_sd] = state;
 		auto& [migrate, landpoint, info, nodeCounts, pathCost] = out_info;
 
-		auto [best, ishold] = context->getBest(upAtt);
+		auto&& [best, ishold] = context->getBest(upAtt);
 		std::optional<std::vector<Oper>> path = std::nullopt;
 
 #ifdef TIMER_MEASURE

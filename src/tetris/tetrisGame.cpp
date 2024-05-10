@@ -339,6 +339,18 @@ void TetrisGame::restart() {
 
     if(0)
     {
+
+        {
+            //TetrisMap map(10, 40);
+            map[{0}] = { 895, 1015, 959, 1007, 1022, 511, 1021, 959, 767, 511, 895, 1021, 1007, 1015, 1022, 511, 767, 881, 449, 1017, 513, 512 };
+            tn = TetrisNode::spawn(Piece::L, &map, dySpawn);
+			rS.bag = { Piece::I, Piece::T, Piece::L, Piece::I, Piece::S, Piece::Z, Piece::T, Piece::O, Piece::J, Piece::I };
+            rS.displayBag = { Piece::S, Piece::Z, Piece::L, Piece::J, Piece::O, Piece::S };
+            hS.type = Piece::O;
+        }
+
+        /*
+
         //TetrisMap map(10, 40);
         //map[{0}] = { 895, 991, 1007, 1019, 1022, 1015, 1022, 767, 1021, 959, 511, 991, 1015, 1019, 511, 1019, 951, 358, 7, 3, 14, 8 };
         map[{0}] = { 895, 991, 1007, 1019, 1022, 1015, 1022, 767, 1021, 959, 511, 991, 1015, 1019, 511, 1019, 951, 358, 7, 3 };
@@ -348,6 +360,7 @@ void TetrisGame::restart() {
         rS.bag = { Piece::T };
         rS.displayBag = { Piece::O, Piece::O, Piece::S, Piece::Z, Piece::J, Piece::I };// , Piece::T};
         hS.type = Piece::S;
+        */
     }
 	
     switchMode(mode, true);

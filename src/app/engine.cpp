@@ -287,7 +287,7 @@ namespace chrome {
 				};
 			tetris.hK.botcall_handle = std::async(std::launch::async, call_bot, time);
 			//call_bot(time);
-			tetris.hK.botPressed = 0;
+			tetris.hK.botPressed = 0;// -1;
 		}
 	}
 
